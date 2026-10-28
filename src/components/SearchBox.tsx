@@ -16,6 +16,7 @@ import { loadByo } from "./ModelSettings";
 import { navStart } from "./NavProgress";
 import { PixelIcon, type IconName } from "./PixelIcon";
 import { WaitChart } from "./WaitChart";
+import { fuzzyApp, namesOf } from "@/lib/match";
 
 const TRY = ["Zoom", "HubSpot", "Dropbox", "Salesforce", "Spotify", "Strava", "figma.com"];
 
@@ -61,14 +62,6 @@ const TIPS = [
 const escRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const nameRe = (n: string, flags = "") => new RegExp(`(?<=[^a-z0-9])${escRe(n)}(?:'s)?(?=[^a-z0-9])`, flags);
 
-/** Ways an app might be written: its name, its slug, and a distinctive first word. */
-function namesOf(a: AppSummary): string[] {
-  const names = new Set([a.name.toLowerCase(), a.slug.replace(/-/g, " "), a.slug]);
-  const first = a.name.toLowerCase().split(/\s+/)[0];
-  if (first.length > 3) names.add(first);
-  return [...names];
-}
-
 /** Library apps named in free text, in the order they appear. */
 function findApps(text: string, apps: AppSummary[]): AppSummary[] {
   const t = ` ${text.toLowerCase()} `;
@@ -94,30 +87,6 @@ function leftover(text: string, found: AppSummary[]): string[] {
     .filter((w) => /[a-z0-9]{2,}/.test(w));
 }
 
-function lev(a: string, b: string): number {
-  const d = Array.from({ length: b.length + 1 }, (_, j) => j);
-  for (let i = 1; i <= a.length; i++) {
-    let diag = d[0];
-    d[0] = i;
-    for (let j = 1; j <= b.length; j++) {
-      const up = d[j];
-      d[j] = Math.min(d[j] + 1, d[j - 1] + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1));
-      diag = up;
-    }
-  }
-  return d[b.length];
-}
-
-/** Closest library app to a misspelt word. Only used when the AI resolver can't be reached. */
-function fuzzyApp(word: string, apps: AppSummary[]): AppSummary | undefined {
-  let best: [number, AppSummary] | undefined;
-  for (const a of apps)
-    for (const n of namesOf(a)) {
-      const d = lev(word, n);
-      if (d <= (n.length >= 7 ? 2 : 1) && (!best || d < best[0])) best = [d, a];
-    }
-  return best?.[1];
-}
 
 const ASKY = /^(how|what|why|which|when|where|who|can|could|do|does|did|is|are|should|will|would|explain|tell|help|write|give|list|show|make|draft)\b/i;
 const OAUTHY = /\b(oauth|scopes?|review|approv\w*|verif\w*|tokens?|api|apps?|integrat\w*|casa|consent|redirect|client|marketplace|publish\w*|sso|pkce|refresh|webhooks?|permissions?)\b/i;

@@ -71,7 +71,7 @@ Verdict and difficulty up top, then the paths, a timeline of who does what, ever
 
 ### The live agent
 
-Type any app. You watch the agent plan, read the docs (including the site's `llms.txt` index), recover dead links, check topic coverage, strip site navigation, probe the real OAuth endpoints, write, then quote-check its own claims, with elapsed time, tokens and cost as it goes.
+Type any app. You watch the agent plan, search the web, map the docs site, read the docs (including the site's `llms.txt` index), recover dead links, fill gaps with targeted searches, check topic coverage, strip site navigation, probe the real OAuth endpoints, write, then quote-check its own claims, with elapsed time, tokens and cost as it goes.
 
 ![Live investigation of Asana: plan, read, follow, probe and write steps, a transcript of tool calls, and a sources panel](docs/screenshots/agent.png)
 
@@ -99,7 +99,7 @@ You don't have to pick a mode. Plain text in the default box goes where it belon
 | `/investigate <app or site>` | The default. Opens a library guide, or runs the live agent |
 | `/ask <question>` | Ask mode. Name one app to use its guide; name several, or none, to ask across the library. Follow-ups keep the conversation |
 | `/compare <app> <app> [app]` | Verdict, difficulty, timelines, worst-case wait and managed-app status side by side, plus the wait chart for just those apps. Exact library names compare instantly. Typos and nicknames (`gmial vs msft teams`) go to a small model that reads the list; apps with no guide yet are researched live by the agent, in parallel, and drop into the table as they finish |
-| `/chat <anything>` | Open chat, not limited to OAuth: code, writing, ideas. Multi-turn, Markdown with copyable code blocks, the model's reasoning shown live then folded into "Thought for Ns", retry and copy. Not grounded in the guides, and says so; `/ask` stays the cited mode |
+| `/chat <anything>` | Open chat, not limited to OAuth: code, writing, ideas. Multi-turn, Markdown with copyable code blocks, the model's reasoning shown live then folded into "Thought for Ns", retry and copy. Before answering, a quick planning call picks **tools**, shown Claude Code style (`⏺ Search(…) ⎿ 8 results`): library guides for apps you ask about, links you paste, and, with the **web search** toggle on (off by default, remembered per browser), a web search whose top two results are read in full. Answers cite what they used as links; `/ask` stays the strictly cited mode |
 | `/play` | Opens the pocket console: pick an app, jump its approval gates, win to open its guide |
 | `/random` | Opens a random curated guide |
 | `/model` | Choose the model, or bring your own key |
@@ -166,7 +166,8 @@ npm run dev                   # http://localhost:3000
 | `OPENCODE_API_KEY` | yes (or Gemini) | Default model: DeepSeek V4.1 Flash via [OpenCode Zen](https://opencode.ai/zen) |
 | `GEMINI_API_KEY` | optional | Free-tier fallback (small daily quota) |
 | `BLOB_READ_WRITE_TOKEN` | in production | Persists agent-generated guides in Vercel Blob. Without it they're saved to `./data/generated` |
-| `JINA_API_KEY` | optional | Higher rate limits for the page reader |
+| `JINA_API_KEY` | recommended | Higher rate limits for the page reader (without it, busy runs hit 429s), and Jina search as a fallback |
+| `EXA_API_KEY` | optional | Higher rate limit for web search (Exa's hosted search works without a key) |
 | `OPENCODE_MODELS_SMART`, `OPENCODE_MODELS_FAST` | optional | Comma-separated model fallback chains |
 | `GENERATE_LIMIT_PER_HOUR` | optional | Fresh agent runs per IP on the shared key (default 8) |
 | `ASK_LIMIT_PER_HOUR` | optional | Questions per IP on the shared key (default 40) |
@@ -186,8 +187,10 @@ npm run dev                   # http://localhost:3000
 | Step | What happens |
 |---|---|
 | Plan | The model (reasoning off) identifies the app and proposes 5–8 official doc URLs |
-| Read | Each URL is fetched, plus the docs host's `llms.txt` index if it has one. 404s, JS-only shells, login pages and duplicates are dropped and shown. **Dead links are recovered** by matching them to the live page on the same host whose path shares the most words |
+| Search | Two **web searches** (registration, and review/approval) run alongside the reads, and up to 4 results on the app's own sites are read: real pages, not guesses. Search is [Exa](https://exa.ai)'s hosted search (no key; `EXA_API_KEY` lifts its limit), with Jina search as a fallback when `JINA_API_KEY` is set. The docs host's **sitemap** is mapped too, so link picking and dead-link recovery choose from pages that exist |
+| Read | Each URL is fetched, plus the docs host's `llms.txt` index if it has one. 404s, login pages and duplicates are dropped and shown; pages that only render with JavaScript get a second try in a real browser. A rate-limited read backs off and retries once, and pages are cached for a few hours. **Dead links are recovered** by matching them to the live page on the same host whose path shares the most words |
 | Follow | Code measures **topic coverage** (registration, scopes, review, limits, tokens, distribution). Links that fill a missing topic rank first, and the model is told which gaps to fill when it picks up to 7 more |
+| Fill gaps | Topics still thin after following get a **targeted search each** (e.g. "Zendesk API rate limits"), or the sitemap's best match, and the top page on the app's own docs is read |
 | Clean | Lines repeated across a site's pages (menus, footers) are stripped, so the writer and the quote checker read the docs, not the chrome. On Spotify this removed ~140k characters and raised verified quotes from 10/23 to 31/33 |
 | Probe | Real GETs: `/.well-known/openid-configuration`, then the authorize endpoint with a fake `client_id`, to see whether it exists and how it fails |
 | Write | The model writes the guide from numbered sources only, constrained by a JSON schema with enums |

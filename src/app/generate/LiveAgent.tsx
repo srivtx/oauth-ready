@@ -12,7 +12,7 @@ import type { AgentEvent, Guide } from "@/lib/types";
 
 const TODOS: { id: "plan" | "read" | "follow" | "probe" | "write" | "check"; label: string }[] = [
   { id: "plan", label: "Identify the app, plan sources" },
-  { id: "read", label: "Read docs + llms.txt index" },
+  { id: "read", label: "Search, map and read the docs" },
   { id: "follow", label: "Follow OAuth / review links" },
   { id: "probe", label: "Probe the real OAuth endpoints" },
   { id: "write", label: "Write guide from evidence" },

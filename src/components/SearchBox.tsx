@@ -8,7 +8,7 @@ import type { Fact } from "@/lib/facts";
 import { summarize, type AppSummary } from "@/lib/summary";
 import { fmtHours } from "@/lib/time";
 import type { AgentEvent } from "@/lib/types";
-import { AnswerText, CopyButton, FactPeek, RichText, streamAsk, streamChat, type ChatMsg } from "./answer";
+import { AnswerText, CopyButton, FactPeek, RichText, streamAsk, streamChat, type ChatMsg, type ChatTool } from "./answer";
 import { Difficulty } from "./bits";
 import { Handheld, type Cart } from "./Handheld";
 import { streamAgent } from "./agentStream";
@@ -27,7 +27,7 @@ const COMMANDS: Command[] = [
   { id: "investigate", icon: "read", arg: "<app or site>", desc: "open its guide, or research it live", mode: "investigate" },
   { id: "ask", icon: "ask", arg: "<question>", desc: "OAuth questions, answered from the guides with citations", mode: "ask" },
   { id: "compare", icon: "versus", arg: "<app> <app>", desc: "side by side; fixes typos, researches new apps live", mode: "compare" },
-  { id: "chat", icon: "chat", arg: "<anything>", desc: "open chat about anything, not just OAuth", mode: "chat" },
+  { id: "chat", icon: "chat", arg: "<anything>", desc: "open chat about anything, with optional web search", mode: "chat" },
   { id: "play", icon: "game", desc: "pocket console: run an app's approval gates" },
   { id: "random", icon: "dice", desc: "open a random guide" },
   { id: "model", icon: "gear", desc: "choose the model or bring your own key" },
@@ -161,7 +161,7 @@ async function research(query: string, signal: AbortSignal, on: (e: AgentEvent) 
 type Turn = { q: string; text: string; model?: string; error?: boolean };
 /** A chat with one guide (app) or with the whole library (app null). */
 type Convo = { app: AppSummary | null; turns: Turn[]; facts: Map<string, Fact>; busy: boolean };
-type ChatTurn = { q: string; text: string; thought: string; t0: number; thinkMs?: number; model?: string; error?: string; stopped?: boolean };
+type ChatTurn = { q: string; text: string; thought: string; t0: number; th0?: number; thinkMs?: number; tools?: ChatTool[]; model?: string; error?: string; stopped?: boolean };
 type Chat = { turns: ChatTurn[]; busy: boolean };
 type Live = { verb: string; detail?: string; tokens: number; t0: number; t1?: number; error?: string };
 /** One app in a comparison: from the library, or researched live by the agent. */
@@ -225,6 +225,20 @@ export function SearchBox({ apps, carts }: { apps: AppSummary[]; carts: Cart[] }
   const [play, setPlay] = useState(false);
   // With an answer open, the command menu floats over it instead of pushing it down and back.
   const [floatMenu, setFloatMenu] = useState(false);
+  // Chat searches the web only when you turn it on; remembered per browser.
+  const [webSearch, setWebSearch] = useState(false);
+  useEffect(() => {
+    try {
+      setWebSearch(localStorage.getItem("oauthready:websearch") === "1");
+    } catch {}
+  }, []);
+  const toggleSearch = () =>
+    setWebSearch((on) => {
+      try {
+        localStorage.setItem("oauthready:websearch", on ? "0" : "1");
+      } catch {}
+      return !on;
+    });
   const input = useRef<HTMLTextAreaElement>(null);
   const box = useRef<HTMLDivElement>(null);
   const ctrl = useRef<AbortController | null>(null);
@@ -440,7 +454,13 @@ export function SearchBox({ apps, carts }: { apps: AppSummary[]; carts: Cart[] }
     try {
       await streamChat(
         history.slice(-20),
-        { thought: (v) => put({ thought: last().thought + v }), delta: (v) => put({ text: last().text + v, thinkMs: last().thinkMs ?? Date.now() - last().t0 }), done: (model) => put({ model }) },
+        webSearch,
+        {
+          tool: (x) => put({ tools: [...(last().tools ?? []).filter((y) => y.id !== x.id), x].sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1))) }),
+          thought: (v) => put({ thought: last().thought + v, th0: last().th0 ?? Date.now() }),
+          delta: (v) => put({ text: last().text + v, thinkMs: last().thinkMs ?? Date.now() - (last().th0 ?? last().t0) }),
+          done: (model) => put({ model }),
+        },
         ac.signal,
       );
       put({}, false);
@@ -788,11 +808,23 @@ export function SearchBox({ apps, carts }: { apps: AppSummary[]; carts: Cart[] }
                 )}
               </>
             ) : mode === "chat" ? (
-              <span>
-                {chatLog.turns.length
-                  ? `continuing your chat · ${chatLog.turns.length} message${chatLog.turns.length === 1 ? "" : "s"} · /clear starts over`
-                  : "open chat: code, writing, ideas, anything. For cited OAuth answers, use /ask"}
-              </span>
+              <>
+                <button
+                  type="button"
+                  aria-pressed={webSearch}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={toggleSearch}
+                  title={webSearch ? "Chat may search the web before answering" : "Chat answers without searching the web"}
+                  className={`${webSearch ? "border border-accent bg-accent px-2 py-0.5 text-[#13221a] hover:bg-white" : chip} flex items-center gap-1.5`}
+                >
+                  <span aria-hidden>{webSearch ? "◉" : "○"}</span> web search {webSearch ? "on" : "off"}
+                </button>
+                <span>
+                  {chatLog.turns.length
+                    ? `continuing your chat · ${chatLog.turns.length} message${chatLog.turns.length === 1 ? "" : "s"} · /clear starts over`
+                    : "open chat: code, writing, ideas, anything · reads links you paste"}
+                </span>
+              </>
             ) : named.length || unknown.length ? (
               <>
                 <span>comparing</span>
@@ -1059,6 +1091,7 @@ function ChatPanel({ chat, onRetry, onNew }: { chat: Chat; onRetry: () => void; 
               <div className="flex justify-end">
                 <p className="max-w-[85%] whitespace-pre-wrap break-words border border-line bg-white/[0.05] px-3 py-2 text-[14px] text-text">{t.q}</p>
               </div>
+              {t.tools?.length ? <ToolLines tools={t.tools} /> : null}
               <Thought t={t} streaming={streaming} />
               {t.text && (
                 <div className="break-words text-[14px] leading-relaxed text-text/90">
@@ -1078,7 +1111,7 @@ function ChatPanel({ chat, onRetry, onNew }: { chat: Chat; onRetry: () => void; 
       </div>
       {!chat.busy && (
         <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-line pt-2 font-mono text-[10px] text-faint">
-          <span>{last.model ? `${last.model} · open chat, not from the guides` : "open chat, not from the guides"}</span>
+          <span>{[last.model, last.tools?.length ? `used ${[...new Set(last.tools.map((x) => x.name.toLowerCase()))].join(", ")}` : "open chat, not from the guides"].filter(Boolean).join(" · ")}</span>
           <span className="ml-auto flex gap-3">
             {last.text && <CopyButton text={last.text} />}
             <button type="button" onClick={onRetry} className="hover:text-text">
@@ -1091,13 +1124,38 @@ function ChatPanel({ chat, onRetry, onNew }: { chat: Chat; onRetry: () => void; 
   );
 }
 
+/** What the chat looked up before answering: ⏺ Search(query) ⎿ 8 results. */
+function ToolLines({ tools }: { tools: ChatTool[] }) {
+  return (
+    <div className="space-y-1 font-mono text-[11px] leading-relaxed">
+      {tools.map((x) => (
+        <div key={x.id} className="fade-in min-w-0">
+          <div className="flex min-w-0 gap-2">
+            <span className={x.status === "run" ? "pulse-dot text-muted" : x.status === "ok" ? "text-tested" : "text-you"}>⏺</span>
+            <span className="min-w-0 truncate">
+              <span className="font-semibold text-text">{x.name}</span>
+              <span className="text-muted">({x.arg})</span>
+            </span>
+          </div>
+          {x.result && (
+            <div className="flex min-w-0 gap-2 pl-1.5">
+              <span className="text-faint">⎿</span>
+              <span className={`min-w-0 truncate ${x.status === "warn" ? "text-you" : "text-faint"}`}>{x.result}</span>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** Reasoning, Claude-style: live while the model thinks, then folded into "Thought for Ns". */
 function Thought({ t, streaming }: { t: ChatTurn; streaming: boolean }) {
   const [open, setOpen] = useState(false);
   if (streaming && !t.text)
     return (
       <div className="min-w-0">
-        <Working verb={t.thought ? "Thinking" : "Warming up"} t0={t.t0} extra="esc to interrupt" />
+        <Working verb={t.thought ? "Thinking" : t.tools?.some((x) => x.status === "run") ? "Researching" : "Warming up"} t0={t.t0} extra="esc to interrupt" />
         {t.thought && <p className="mt-1 line-clamp-3 border-l border-line pl-3 font-mono text-[11px] italic leading-relaxed text-faint">{t.thought.slice(-360)}</p>}
       </div>
     );

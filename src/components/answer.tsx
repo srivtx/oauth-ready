@@ -17,7 +17,10 @@ export const CHIP: Record<Fact["evidence"], string> = {
   guide: "border-white/50 bg-white/10 text-text",
 };
 
-type Handlers = { delta: (v: string) => void; facts?: (f: Fact[]) => void; thought?: (v: string) => void; done?: (model: string) => void };
+/** A tool the chat ran before answering (search, read, guide), Claude Code style. */
+export type ChatTool = { id: string; name: string; arg: string; status: "run" | "ok" | "warn"; result?: string };
+
+type Handlers = { delta: (v: string) => void; facts?: (f: Fact[]) => void; thought?: (v: string) => void; tool?: (t: ChatTool) => void; done?: (model: string) => void };
 
 /** POST and feed the NDJSON stream to callbacks. Throws on HTTP or model errors. */
 async function streamNd(path: string, body: object, on: Handlers, signal: AbortSignal) {
@@ -39,8 +42,9 @@ async function streamNd(path: string, body: object, on: Handlers, signal: AbortS
     buf = lines.pop() ?? "";
     for (const l of lines) {
       if (!l.trim()) continue;
-      const e = JSON.parse(l) as { t: "d"; v: string } | { t: "th"; v: string } | { t: "facts"; v: Fact[] } | { t: "done"; model: string } | { t: "err"; msg: string };
+      const e = JSON.parse(l) as { t: "d"; v: string } | { t: "th"; v: string } | { t: "facts"; v: Fact[] } | ({ t: "tool" } & ChatTool) | { t: "done"; model: string } | { t: "err"; msg: string };
       if (e.t === "d") on.delta(e.v);
+      else if (e.t === "tool") on.tool?.({ id: e.id, name: e.name, arg: e.arg, status: e.status, result: e.result });
       else if (e.t === "th") on.thought?.(e.v);
       else if (e.t === "facts") on.facts?.(e.v);
       else if (e.t === "done") on.done?.(e.model);
@@ -52,8 +56,8 @@ async function streamNd(path: string, body: object, on: Handlers, signal: AbortS
 /** Grounded Q&A over one guide (slug) or the whole library. */
 export const streamAsk = (body: { slug?: string; messages: ChatMsg[]; withFacts?: boolean }, on: Handlers, signal: AbortSignal) => streamNd("/api/ask", body, on, signal);
 
-/** Open chat, not limited to the guides. Streams reasoning (thought) before the answer. */
-export const streamChat = (messages: ChatMsg[], on: Handlers, signal: AbortSignal) => streamNd("/api/chat", { messages }, on, signal);
+/** Open chat, not limited to the guides; `search` lets it search the web. Streams tool calls and reasoning before the answer. */
+export const streamChat = (messages: ChatMsg[], search: boolean, on: Handlers, signal: AbortSignal) => streamNd("/api/chat", { messages, search }, on, signal);
 
 /** Markdown-lite answer text with [R2, S1] citations turned into evidence chips. */
 export function AnswerText({ text, facts, onPeek }: { text: string; facts: Map<string, Fact>; onPeek: (f: Fact) => void }) {
@@ -162,14 +166,15 @@ function RichLine({ line }: { line: string }) {
   return <p><Inline text={line} /></p>;
 }
 
-/** Bold, inline code and [links](https://…) inside one line. */
+/** Bold, inline code and [links](https://…) inside one line; site links (/guides/…) open in place. */
 function Inline({ text }: { text: string }) {
   return (
     <>
-      {text.split(/(\[[^\]\n]+\]\(https?:\/\/[^)\s]+\))/g).map((p, i) => {
-        const m = /^\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)$/.exec(p);
+      {text.split(/(\[[^\]\n]+\]\((?:https?:\/\/|\/(?!\/))[^)\s]+\))/g).map((p, i) => {
+        const m = /^\[([^\]]+)\]\(((?:https?:\/\/|\/(?!\/))[^)\s]+)\)$/.exec(p);
+        const local = m?.[2].startsWith("/");
         return m ? (
-          <a key={i} href={m[2]} target="_blank" rel="noreferrer noopener" className="text-accent underline decoration-dotted underline-offset-2 hover:text-white">
+          <a key={i} href={m[2]} {...(local ? {} : { target: "_blank", rel: "noreferrer noopener" })} className="text-accent underline decoration-dotted underline-offset-2 hover:text-white">
             {m[1]}
           </a>
         ) : (

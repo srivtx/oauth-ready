@@ -29,14 +29,46 @@ export function safeUrl(raw: string): URL | null {
 
 const NOT_FOUND = /(^|\n)(Title:.*\b(404|not found|page not found)\b|#\s*404\b)|Target URL returned error 404|West of a white house/i;
 
+// Pages read recently, per server instance: repeat runs, compares and chat re-read the same docs.
+const pageCache = new Map<string, { at: number; page: Page }>();
+const PAGE_TTL = 6 * 3600_000;
+
+/**
+ * Read a page as Markdown through Jina Reader. Pages that come back empty because they only render
+ * with JavaScript get one more try in a real browser. Successful reads are cached for a few hours.
+ */
 export async function readPage(raw: string, maxChars = 14000): Promise<Page> {
+  const key = raw.split("#")[0];
+  const hit = pageCache.get(key);
+  if (hit && Date.now() - hit.at < PAGE_TTL) return { ...hit.page, text: hit.page.text.slice(0, maxChars) };
+  let page = await readOnce(raw, false);
+  if (page.status === "error: empty or JS-only page") {
+    const rendered = await readOnce(raw, true);
+    if (rendered.ok) page = rendered;
+  }
+  if (page.ok) {
+    if (pageCache.size > 400) pageCache.delete(pageCache.keys().next().value!);
+    pageCache.set(key, { at: Date.now(), page });
+  }
+  return { ...page, text: page.text.slice(0, maxChars) };
+}
+
+async function readOnce(raw: string, browser: boolean): Promise<Page> {
+  const maxChars = 40000;
   const u = safeUrl(raw);
   const empty = { url: raw, title: "", text: "", links: [] };
   if (!u) return { ...empty, ok: false, status: "error: blocked url" };
   const headers: Record<string, string> = { "X-Return-Format": "markdown", "User-Agent": UA };
+  if (browser) headers["X-Engine"] = "browser";
   if (process.env.JINA_API_KEY) headers.Authorization = `Bearer ${process.env.JINA_API_KEY}`;
   try {
-    const res = await fetch(`https://r.jina.ai/${u.toString()}`, { headers, signal: AbortSignal.timeout(30_000) });
+    const go = () => fetch(`https://r.jina.ai/${u.toString()}`, { headers, signal: AbortSignal.timeout(browser ? 40_000 : 30_000) });
+    let res = await go();
+    // The reader rate-limits bursts (a run reads many pages at once): back off once and retry.
+    if (res.status === 429) {
+      await new Promise((r) => setTimeout(r, 2000 + Math.random() * 2000));
+      res = await go();
+    }
     const body = await res.text();
     if (!res.ok) return { ...empty, ok: false, status: res.status === 404 ? "404" : `error: reader ${res.status}` };
     if (NOT_FOUND.test(body.slice(0, 3000))) return { ...empty, ok: false, status: "404" };
@@ -103,6 +135,113 @@ export async function readLlmsTxt(host: string): Promise<{ url: string; links: {
   } catch {
     return null;
   }
+}
+
+export interface SearchHit {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+/**
+ * Web search. Exa's hosted search (the one OpenCode's own websearch tool uses) needs no key;
+ * EXA_API_KEY lifts its rate limit. JINA_API_KEY adds Jina search as a fallback. Returns null
+ * when no search answered, so callers fall back to the docs sitemap.
+ */
+export async function searchWeb(query: string, objective: string, signal?: AbortSignal): Promise<SearchHit[] | null> {
+  const sig = () => (signal ? AbortSignal.any([signal, AbortSignal.timeout(25_000)]) : AbortSignal.timeout(25_000));
+  try {
+    const key = process.env.EXA_API_KEY ? `?exaApiKey=${encodeURIComponent(process.env.EXA_API_KEY)}` : "";
+    const res = await fetch(`https://mcp.exa.ai/mcp${key}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "web_search_exa", arguments: { query: query.slice(0, 300), objective: objective.slice(0, 600), numResults: 8 } },
+      }),
+      signal: sig(),
+    });
+    const body = await res.text();
+    const json = body.includes("data:") ? body.split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trim()).pop() : body;
+    const r = JSON.parse(json ?? "{}") as { result?: { content?: { text?: string }[]; isError?: boolean } };
+    const text = r.result?.isError ? "" : (r.result?.content ?? []).map((c) => c.text ?? "").join("\n---\n");
+    const hits = text
+      .split(/\n---\n/)
+      .map((block) => {
+        const url = block.match(/^URL:\s*(\S+)/m)?.[1]?.split("#")[0] ?? "";
+        const title = block.match(/^Title:\s*(.+)$/m)?.[1]?.trim() ?? "";
+        const snippet = (block.split(/^Highlights:\s*$/m)[1] ?? "").replace(/\s+/g, " ").trim();
+        return { url, title: title === "N/A" ? "" : title.slice(0, 160), snippet: snippet.slice(0, 600) };
+      })
+      .filter((h) => h.url && safeUrl(h.url));
+    if (hits.length) return hits;
+  } catch {
+    if (signal?.aborted) return null;
+  }
+  if (!process.env.JINA_API_KEY) return null;
+  try {
+    const res = await fetch(`https://s.jina.ai/?q=${encodeURIComponent(query.slice(0, 200))}`, {
+      headers: { Accept: "application/json", Authorization: `Bearer ${process.env.JINA_API_KEY}`, "X-Respond-With": "no-content" },
+      signal: sig(),
+    });
+    if (!res.ok) return null;
+    const j = (await res.json()) as { data?: { title?: string; url?: string; description?: string }[] };
+    const hits = (j.data ?? [])
+      .filter((r) => r.url && safeUrl(r.url))
+      .slice(0, 8)
+      .map((r) => ({ title: (r.title ?? "").slice(0, 160), url: r.url!.split("#")[0], snippet: (r.description ?? "").slice(0, 600) }));
+    return hits.length ? hits : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Every page URL a docs site lists in its sitemap (robots.txt "Sitemap:" lines, else /sitemap.xml),
+ * following sitemap indexes a little way. A real map of the site, so the agent picks pages that
+ * exist instead of guessing paths. Capped so a huge site can't stall a run.
+ */
+export async function readSitemap(host: string): Promise<string[]> {
+  const root = safeUrl(`https://${host}/`);
+  if (!root) return [];
+  const get = async (url: string): Promise<string> => {
+    if (!safeUrl(url)) return "";
+    try {
+      const res = await fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(8_000) });
+      if (!res.ok || !res.body) return "";
+      const stream = url.endsWith(".gz") && !(res.headers.get("content-encoding") ?? "").includes("gzip") ? res.body.pipeThrough(new DecompressionStream("gzip")) : res.body;
+      const reader = stream.getReader();
+      const dec = new TextDecoder();
+      let text = "";
+      while (text.length < 3_000_000) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        text += dec.decode(value, { stream: true });
+      }
+      reader.cancel().catch(() => {});
+      return text;
+    } catch {
+      return "";
+    }
+  };
+  const robots = await get(`https://${host}/robots.txt`);
+  const listed = [...robots.matchAll(/^\s*sitemap:\s*(\S+)/gim)].map((m) => m[1]);
+  const queue = listed.length ? listed.slice(0, 4) : [`https://${host}/sitemap.xml`];
+  const pages = new Set<string>();
+  const loc = (xml: string) => [...xml.matchAll(/<loc>\s*(?:<!\[CDATA\[)?\s*([^<\]\s]+)/g)].map((m) => m[1].replace(/&amp;/g, "&"));
+  // Child sitemaps that look like docs go first: "sitemap-docs.xml" before "sitemap-blog.xml".
+  const docsy = (u: string) => (/doc|develop|api|guide|help|support|reference/i.test(u) ? 0 : /blog|news|press|career|job|event|customer|partner-directory|[a-z]{2}-[a-z]{2}/i.test(u) ? 2 : 1);
+  let fetched = 0;
+  while (queue.length && fetched < 6 && pages.size < 20000) {
+    const xml = await get(queue.shift()!);
+    fetched++;
+    if (/<sitemapindex/i.test(xml)) queue.push(...loc(xml).sort((a, b) => docsy(a) - docsy(b)).slice(0, 8));
+    else for (const u of loc(xml)) if (pages.size < 20000) pages.add(u.split("#")[0]);
+    queue.sort((a, b) => docsy(a) - docsy(b));
+  }
+  return [...pages].filter((u) => safeUrl(u));
 }
 
 export interface ProbeResult {

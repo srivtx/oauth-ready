@@ -4,7 +4,7 @@ import { slugify } from "../guides";
 import { llmJSON, type ByoKey, type StreamEvent } from "./llm";
 import { FOLLOW_SYSTEM, PLAN_SYSTEM, VERIFY_SYSTEM, WRITE_SYSTEM, planUser } from "./prompts";
 import { DRAFT_SCHEMA, FOLLOW_SCHEMA, PLAN_SCHEMA, VERIFY_SCHEMA } from "./schema";
-import { fetchLogo, linkAlive, probeAuthorize, probeDiscovery, readLlmsTxt, readPage, safeUrl, type Page, type ProbeResult } from "./web";
+import { fetchLogo, linkAlive, probeAuthorize, probeDiscovery, readLlmsTxt, readPage, readSitemap, safeUrl, searchWeb, type Page, type ProbeResult, type SearchHit } from "./web";
 import { BRANDS } from "../brand";
 
 interface Plan {
@@ -108,6 +108,15 @@ export async function runAgent(input: string, { emit, byo, signal }: RunOptions)
     ["tokens", /refresh[ _-]?token|access[ _-]?token|expir(es|y|ation)|token lifetime/gi],
     ["distribution", /publish|distribut|public app|install(ation)? (url|link|flow)|multi-?tenant/gi],
   ];
+  // What to search for when a topic is still thin after reading.
+  const TOPIC_QUERY: Record<string, string> = {
+    registration: "how to register an OAuth app: client ID, client secret and redirect URI",
+    scopes: "OAuth scopes and permissions reference",
+    review: "app review, verification or marketplace approval process for OAuth apps",
+    limits: "API rate limits",
+    tokens: "OAuth access token and refresh token lifetime",
+    distribution: "publish or distribute a public OAuth app to other accounts",
+  };
   const coverage = (texts: string[]) => {
     const all = texts.join("\n");
     return Object.fromEntries(TOPICS.map(([t, re]) => [t, (all.match(re)?.length ?? 0) >= 3])) as Record<string, boolean>;
@@ -147,7 +156,7 @@ export async function runAgent(input: string, { emit, byo, signal }: RunOptions)
   check();
 
   // 2. Read candidate sources + llms.txt ----------------------------------
-  emit({ type: "step", id: "read", label: "Fetch and read candidate docs" });
+  emit({ type: "step", id: "read", label: "Search, map and read the docs" });
   emit({ type: "status", verb: "Reading the docs" });
   const seen = new Set<string>();
   const pages: Page[] = [];
@@ -176,7 +185,26 @@ export async function runAgent(input: string, { emit, byo, signal }: RunOptions)
     .filter((u): u is string => !!u && !!safeUrl(u) && !seen.has(u) && !!seen.add(u))
     .slice(0, 8);
   const docHosts = [...new Set([plan.developerPortal, ...candidates].filter((u): u is string => !!u && !!safeUrl(u)).map((u) => new URL(u).hostname))].slice(0, 3);
-  const [, llmsResults] = await Promise.all([
+  // The app's own sites: search results and links there count as official.
+  const site = (u: string) => {
+    try {
+      return new URL(/^https?:/.test(u) ? u : `https://${u}`).hostname.split(".").slice(-2).join(".");
+    } catch {
+      return "";
+    }
+  };
+  const officialSites = new Set([plan.website, plan.developerPortal ?? "", ...docHosts].map(site).filter(Boolean));
+  const token = plan.slug.split("-")[0];
+  const official = (u: string) => officialSites.has(site(u)) || (token.length > 3 && site(u).startsWith(token));
+  const search = async (q: string, objective: string): Promise<SearchHit[]> => {
+    const done = run("Search", q);
+    const hits = await searchWeb(q, objective, signal);
+    const mine = (hits ?? []).filter((h) => official(h.url));
+    done(hits ? "ok" : "warn", hits ? `${hits.length} results · ${mine.length} on ${plan.name}'s own sites` : "search unavailable — using the docs sitemap");
+    return hits ?? [];
+  };
+  const objective = `Official ${plan.name} developer documentation (${[...officialSites].join(", ")}). Rank the provider's own docs first; skip third-party blogs and forums.`;
+  const [, llmsResults, searchHits, sitemaps] = await Promise.all([
     readAll(candidates),
     Promise.all(
       docHosts.map(async (h) => {
@@ -186,13 +214,40 @@ export async function runAgent(input: string, { emit, byo, signal }: RunOptions)
         return r;
       }),
     ),
+    Promise.all([
+      search(`${plan.name} developer docs: create and register an OAuth app (client ID, redirect URI, scopes)`, objective),
+      search(`${plan.name} OAuth app review, verification or marketplace approval for production`, objective),
+    ]).then((r) => r.flat()),
+    Promise.all(
+      docHosts.slice(0, 2).map(async (h) => {
+        const done = run("Fetch", `${h}/sitemap.xml`);
+        const urls = await readSitemap(h);
+        done(urls.length ? "ok" : "warn", urls.length ? `${urls.length.toLocaleString()} pages mapped` : "no sitemap");
+        return urls;
+      }),
+    ).then((r) => r.flat()),
   ]);
   check();
+
+  // 2a. Read what search found on the app's own docs: real pages, not guesses.
+  const found = [...new Map(searchHits.filter((h) => official(h.url)).map((h) => [h.url, h])).values()];
+  const fromSearch = found
+    .map((h) => h.url)
+    .filter((u) => safeUrl(u) && !seen.has(u) && seen.add(u))
+    .slice(0, 4);
+  if (fromSearch.length) {
+    emit({ type: "status", verb: "Reading what search found" });
+    await readAll(fromSearch);
+    check();
+  }
+  // Everything else search and the sitemap know about joins the pool of links to follow.
+  const sitemapLinks = sitemaps.map((u) => ({ url: u, text: `[sitemap] ${u.replace(/^https?:\/\/[^/]+/, "").replace(/[-_/]+/g, " ").trim()}` }));
+  const searchLinks = searchHits.filter((h) => !seen.has(h.url)).map((h) => ({ url: h.url, text: `[search] ${h.title} — ${h.snippet.slice(0, 140)}` }));
 
   // 2b. Recover dead links: guessed doc URLs go stale, so look for the live page on the same
   // host whose path shares the most words (from llms.txt, then links on the pages we did read).
   if (dead.length) {
-    const index = [...llmsResults.flatMap((r) => r?.links ?? []), ...pages.flatMap((p) => p.links)];
+    const index = [...llmsResults.flatMap((r) => r?.links ?? []), ...sitemapLinks, ...pages.flatMap((p) => p.links)];
     const swaps: string[] = [];
     for (const d of dead.splice(0)) {
       let host = "";
@@ -226,7 +281,9 @@ export async function runAgent(input: string, { emit, byo, signal }: RunOptions)
   emit({ type: "status", verb: "Following leads" });
   const linkPool = new Map<string, string>();
   for (const l of llmsResults.flatMap((r) => r?.links ?? [])) if (!seen.has(l.url)) linkPool.set(l.url, `[llms.txt] ${l.text}`);
+  for (const l of searchLinks) if (!seen.has(l.url) && !linkPool.has(l.url)) linkPool.set(l.url, l.text);
   for (const p of pages) for (const l of p.links) if (!seen.has(l.url) && !linkPool.has(l.url)) linkPool.set(l.url, l.text);
+  for (const l of sitemapLinks) if (!seen.has(l.url) && !linkPool.has(l.url)) linkPool.set(l.url, l.text);
   const strong = /oauth|authoriz|review|verif|scope|permission|submit|publish|marketplace|partner|consent|redirect|client[-_ ]?id|app[-_ ]?(creat|regist|approv)|rate.?limit/gi;
   const weak = /auth|app|distribut|limit|access|developer|security|privacy/i;
   const covered = coverage(pages.map((p) => p.text));
@@ -238,7 +295,7 @@ export async function runAgent(input: string, { emit, byo, signal }: RunOptions)
   });
   // Links that would fill a gap in coverage outrank links about topics we already have.
   const score = (s: string) =>
-    (s.match(strong)?.length ?? 0) * 3 + (weak.test(s) ? 1 : 0) + (s.startsWith("[llms.txt]") ? 1 : 0) + topicsIn(s).filter((t) => missing.includes(t)).length * 4;
+    (s.match(strong)?.length ?? 0) * 3 + (weak.test(s) ? 1 : 0) + (s.startsWith("[llms.txt]") ? 1 : 0) + (s.startsWith("[search]") ? 2 : 0) + topicsIn(s).filter((t) => missing.includes(t)).length * 4;
   const shortlist = [...linkPool.entries()]
     .map(([u, t]) => [u, t, score(u + " " + t)] as const)
     .filter(([, , s]) => s > 0)
@@ -284,6 +341,35 @@ export async function runAgent(input: string, { emit, byo, signal }: RunOptions)
         level: still.length ? "warn" : "ok",
         text: `${filled.length ? `Filled ${filled.join(", ")}` : "No new topics filled"}${still.length ? ` · still thin on ${still.join(", ")} (those claims will lean on inference)` : " · all topics covered"}`,
       });
+  }
+  // 3a. Fill gaps: search for exactly what's still thin, and read the best page on the app's own docs.
+  {
+    const now = coverage(pages.map((p) => p.text));
+    const thin = TOPICS.map(([t]) => t).filter((t) => !now[t]).slice(0, 3);
+    if (thin.length && pages.length < 16) {
+      emit({ type: "status", verb: "Filling gaps" });
+      const results = await Promise.all(thin.map((t) => search(`${plan.name} ${TOPIC_QUERY[t]}`, objective)));
+      const gapPicks: string[] = [];
+      results.forEach((hits) => {
+        const best = hits.find((h) => official(h.url) && !seen.has(h.url) && !gapPicks.includes(h.url) && safeUrl(h.url));
+        if (best) gapPicks.push(best.url);
+      });
+      // No search, or nothing official: the sitemap's best match for each thin topic.
+      for (const t of thin) {
+        if (gapPicks.length >= thin.length) break;
+        const re = new RegExp(TOPICS.find(([x]) => x === t)![1].source, "i");
+        const m = sitemapLinks.find((l) => !seen.has(l.url) && !gapPicks.includes(l.url) && re.test(l.text) && !/blog|changelog|news|community/i.test(l.url));
+        if (m) gapPicks.push(m.url);
+      }
+      gapPicks.forEach((u) => seen.add(u));
+      if (gapPicks.length) {
+        await readAll(gapPicks);
+        const after = coverage(pages.map((p) => p.text));
+        const filled = thin.filter((t) => after[t]);
+        emit({ type: "log", level: filled.length ? "ok" : "info", text: filled.length ? `Gap search filled ${filled.join(", ")}` : `Gap search found nothing new on ${thin.join(", ")}` });
+      }
+      check();
+    }
   }
   if (pages.length === 0) emit({ type: "log", level: "warn", text: "No sources could be read — the guide will be marked low-confidence" });
   check();
@@ -332,13 +418,6 @@ export async function runAgent(input: string, { emit, byo, signal }: RunOptions)
   const discovered = probes.map((p) => p.observed.match(/authorization_endpoint=(\S+?);/)?.[1]).find((u) => u && u !== "?");
   // Prefer an explicit authorize URL from the docs, on the app's own domains only: docs often show a *third-party* authorize URL as an example
   // (Zendesk's "add OAuth to your app" page uses Todoist), which isn't this app's endpoint.
-  const site = (u: string) => {
-    try {
-      return new URL(/^https?:/.test(u) ? u : `https://${u}`).hostname.split(".").slice(-2).join(".");
-    } catch {
-      return "";
-    }
-  };
   const own = new Set([plan.website, ...hosts, ...pages.filter((p) => p.ok).map((p) => p.url)].map(site).filter(Boolean));
   const urlsInDocs = pages.flatMap((p) => p.text.match(/https:\/\/[a-z0-9.-]+\/[^\s)"'`<>]*/gi) ?? []).filter((u) => own.has(site(u)));
   // Not token/revoke endpoints (never probed), and not callbacks: those are where users land, not sign in.

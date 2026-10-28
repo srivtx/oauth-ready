@@ -21,13 +21,13 @@ const TICKS: [number, string, string][] = [
 const x = (h: number) => (Math.log(Math.min(Math.max(h, LO), HI) / LO) / Math.log(HI / LO)) * 100;
 const span = ([a, b]: [number, number]) => (fmtHours(a) === fmtHours(b) ? fmtHours(b) : `${fmtHours(a)} – ${fmtHours(b)}`);
 
-export function WaitChart({ apps }: { apps: AppSummary[] }) {
+export function WaitChart({ apps, bare = false }: { apps: AppSummary[]; bare?: boolean }) {
   const rows = [...apps].sort((a, b) => a.prod[1] - b.prod[1] || a.prod[0] - b.prod[0]);
   const [hover, setHover] = useState<AppSummary | null>(null);
   const shown = hover ?? rows[rows.length - 1];
 
   return (
-    <div className="border border-line bg-panel p-4 sm:p-5">
+    <div className={bare ? "" : "border border-line bg-panel p-4 sm:p-5"}>
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1 font-mono text-[11px] text-muted">
         <span className="flex items-center gap-1.5">
           <span className="h-2 w-5 bg-accent" />
@@ -45,8 +45,8 @@ export function WaitChart({ apps }: { apps: AppSummary[] }) {
           {TICKS.map(([h, l, short]) => (
             <div key={h} className="absolute inset-y-0 border-l border-dashed border-line" style={{ left: `${x(h)}%` }}>
               <span className="absolute -bottom-5 -translate-x-1/2 whitespace-nowrap font-mono text-[10px] text-faint">
-                <span className="sm:hidden">{short}</span>
-                <span className="hidden sm:inline">{l}</span>
+                <span className={bare ? "" : "sm:hidden"}>{short}</span>
+                {!bare && <span className="hidden sm:inline">{l}</span>}
               </span>
             </div>
           ))}

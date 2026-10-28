@@ -77,7 +77,7 @@ Type any app. You watch the agent plan, read the docs (including the site's `llm
 
 ### Ask, with citations
 
-Every guide has a chat that answers only from that guide's facts. Each sentence cites the facts it used as chips coloured by evidence level; click one to see the fact and its verbatim quote. From the home page you can ask across the whole library and keep asking follow-ups. Questions the facts don't cover get a short answer marked *general knowledge*, and off-topic questions are politely declined.
+Every guide has a chat that answers only from that guide's facts. Each sentence cites the facts it used as chips coloured by evidence level; click one to see the fact and its verbatim quote. From the home page you can ask across the whole library and keep asking follow-ups. Questions the facts don't cover get a short answer marked *general knowledge*, and off-topic questions get pointed to `/chat`.
 
 <table>
   <tr>
@@ -88,24 +88,41 @@ Every guide has a chat that answers only from that guide's facts. Each sentence 
 
 ### Commands in the search box
 
-Type `/` for a command menu. When the box is empty it types out a tip; press `Tab` to use it.
+Click the box and it glides to the middle of the screen while the page blurs back, like a command palette; click outside or press `Esc` and it glides home. Type `/` for the command menu. When the box is empty it types out a tip; press `Tab` to use it.
 
-![The slash command menu: investigate, ask, compare, play, random, model](docs/screenshots/commands.png)
+You don't have to pick a mode. Plain text in the default box goes where it belongs: an app name or site opens its guide (or the agent), "gmail vs zendesk" compares, "which is faster, gmail or slack?" asks the guides, and "write a haiku about rain" opens a chat. The line under the box says what `Enter` will do before you press it.
+
+![The search box centred over the blurred page, with the slash command menu: investigate, ask, compare, chat, play, random, model, clear](docs/screenshots/commands.png)
 
 | Command | What it does |
 |---|---|
 | `/investigate <app or site>` | The default. Opens a library guide, or runs the live agent |
 | `/ask <question>` | Ask mode. Name one app to use its guide; name several, or none, to ask across the library. Follow-ups keep the conversation |
-| `/compare <app> <app> [app]` | Verdict, difficulty, timelines, worst-case wait and managed-app status side by side. Instant, no model call |
+| `/compare <app> <app> [app]` | Verdict, difficulty, timelines, worst-case wait and managed-app status side by side, plus the wait chart for just those apps. Exact library names compare instantly. Typos and nicknames (`gmial vs msft teams`) go to a small model that reads the list; apps with no guide yet are researched live by the agent, in parallel, and drop into the table as they finish |
+| `/chat <anything>` | Open chat, not limited to OAuth: code, writing, ideas. Multi-turn, Markdown with copyable code blocks, the model's reasoning shown live then folded into "Thought for Ns", retry and copy. Not grounded in the guides, and says so; `/ask` stays the cited mode |
 | `/play` | Opens the pocket console: pick an app, jump its approval gates, win to open its guide |
 | `/random` | Opens a random curated guide |
 | `/model` | Choose the model, or bring your own key |
+| `/clear` | Starts a new chat and closes the answer panel |
 
-`↑` `↓` choose · `Tab` / `Enter` run · `Shift+Tab` cycles modes · `Backspace` on an empty box leaves a mode.
+`↑` `↓` choose · `Tab` / `Enter` run · `Shift+Tab` cycles modes · `Backspace` on an empty box leaves a mode · `Esc` interrupts a streaming answer or a live comparison · `Shift+Enter` adds a line in chat.
+
+#### Compare, even with typos or apps we've never seen
 
 <table>
   <tr>
-    <td width="62%"><img src="docs/screenshots/compare.png" alt="/compare gmail slack notion: a table of verdict, difficulty, first connection, production, worst-case wait and Composio managed app" /></td>
+    <td width="50%"><img src="docs/screenshots/compare.png" alt="/compare gmial vs slak vs notoin, read as Gmail, Slack and Notion: a table of verdict, difficulty, first connection, production, worst-case wait and Composio managed app, then the wait chart for those three apps" /></td>
+    <td><img src="docs/screenshots/compare-live.png" alt="/compare gmail vs freshdesk: Gmail comes from the library while the agent researches Freshdesk live, showing its current step, elapsed time and tokens" /></td>
+  </tr>
+</table>
+
+Left: "gmial vs slak vs notoin" read as Gmail, Slack and Notion, with the wait chart for just those three. Right: Freshdesk has no guide yet, so the agent researches it live while Gmail waits in the table; its column fills in when the guide is written, and the new guide joins the library.
+
+#### Chat about anything
+
+<table>
+  <tr>
+    <td width="58%"><img src="docs/screenshots/chat.png" alt="/chat: explain PKCE in two bullets with a JS snippet, then a follow-up to make it one line; each reply shows Thought for Ns, code blocks have copy buttons" /></td>
     <td><img src="docs/screenshots/mobile.png" alt="The home page on a phone" /></td>
   </tr>
 </table>
@@ -153,6 +170,8 @@ npm run dev                   # http://localhost:3000
 | `OPENCODE_MODELS_SMART`, `OPENCODE_MODELS_FAST` | optional | Comma-separated model fallback chains |
 | `GENERATE_LIMIT_PER_HOUR` | optional | Fresh agent runs per IP on the shared key (default 8) |
 | `ASK_LIMIT_PER_HOUR` | optional | Questions per IP on the shared key (default 40) |
+| `CHAT_LIMIT_PER_HOUR` | optional | `/chat` messages per IP on the shared key (default 60) |
+| `RESOLVE_LIMIT_PER_HOUR` | optional | `/compare` list readings per IP on the shared key (default 60) |
 
 ### Deploy
 
@@ -202,7 +221,7 @@ npm run dev                   # http://localhost:3000
 
 ```
 src/app/                 pages: / · /guides/[slug] · /generate · /evidence · /how
-src/app/api/             generate (agent stream) · ask (grounded chat stream)
+src/app/api/             generate (agent stream) · ask (grounded, cited) · chat (open chat) · resolve (/compare list reader)
 src/lib/agent/           run.ts (pipeline), web.ts (fetch/probe), llm.ts, schema.ts, prompts.ts, providers.ts
 src/lib/guides/          curated guides (typed data, one file per app)
 src/lib/facts.ts         guides flattened into citable facts for Ask

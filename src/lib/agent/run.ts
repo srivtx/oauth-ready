@@ -330,9 +330,19 @@ export async function runAgent(input: string, { emit, byo, signal }: RunOptions)
     }),
   );
   const discovered = probes.map((p) => p.observed.match(/authorization_endpoint=(\S+?);/)?.[1]).find((u) => u && u !== "?");
-  // Prefer an explicit authorize URL from the docs; never probe token/revoke endpoints.
-  const urlsInDocs = pages.flatMap((p) => p.text.match(/https:\/\/[a-z0-9.-]+\/[^\s)"'`<>]*/gi) ?? []);
-  const notToken = (u: string) => !/token|revoke|introspect|userinfo/i.test(u);
+  // Prefer an explicit authorize URL from the docs, on the app's own domains only: docs often show a *third-party* authorize URL as an example
+  // (Zendesk's "add OAuth to your app" page uses Todoist), which isn't this app's endpoint.
+  const site = (u: string) => {
+    try {
+      return new URL(/^https?:/.test(u) ? u : `https://${u}`).hostname.split(".").slice(-2).join(".");
+    } catch {
+      return "";
+    }
+  };
+  const own = new Set([plan.website, ...hosts, ...pages.filter((p) => p.ok).map((p) => p.url)].map(site).filter(Boolean));
+  const urlsInDocs = pages.flatMap((p) => p.text.match(/https:\/\/[a-z0-9.-]+\/[^\s)"'`<>]*/gi) ?? []).filter((u) => own.has(site(u)));
+  // Not token/revoke endpoints (never probed), and not callbacks: those are where users land, not sign in.
+  const notToken = (u: string) => !/token|revoke|introspect|userinfo|callback|redirect/i.test(u);
   const inDocs = urlsInDocs.find((u) => /authori[sz]e|\/authorization\b/i.test(u) && notToken(u)) ?? urlsInDocs.find((u) => /\/oauth2?\b/i.test(u) && notToken(u));
   const authorize = discovered || inDocs?.split("?")[0] || plan.authorizeEndpointGuess;
   if (authorize) {

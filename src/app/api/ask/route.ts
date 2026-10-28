@@ -3,6 +3,7 @@ import { PROVIDERS } from "@/lib/agent/providers";
 import { factSheet, factsOf, libraryFacts, librarySheet } from "@/lib/facts";
 import { CURATED } from "@/lib/guides";
 import { getGuide, listGenerated } from "@/lib/store";
+import { ipOf, limiter } from "@/lib/ratelimit";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -10,22 +11,14 @@ export const dynamic = "force-dynamic";
 
 // Questions on the site's own key are rate-limited per IP (best-effort, per instance).
 const LIMIT = Number(process.env.ASK_LIMIT_PER_HOUR ?? 40);
-const hits = new Map<string, number[]>();
-function allow(ip: string): boolean {
-  const now = Date.now();
-  const recent = (hits.get(ip) ?? []).filter((t) => now - t < 3600_000);
-  if (recent.length >= LIMIT) return false;
-  recent.push(now);
-  hits.set(ip, recent);
-  return true;
-}
+const allow = limiter(LIMIT);
 
 const RULES = (scope: string) => `Rules:
 - Ground answers in the facts below. Never invent scopes, timelines, URLs, prices or policies about a provider.
 - After each sentence that relies on a fact, cite its id in square brackets, e.g. [R2] or [S1, G3].
 - Be honest about evidence: when a sentence rests on an "inferred" fact, say it's an estimate.
 - If the facts don't cover a question about OAuth, provider apps, scopes, app review or integrations, you may answer briefly from general knowledge: start that part with "General knowledge, not from ${scope}:" and give no citation. If it's about a specific provider's current policy, also suggest checking its docs.
-- If the question has nothing to do with OAuth, APIs or integrations, say in one sentence that you only answer integration questions and suggest one you can answer.
+- If the question has nothing to do with OAuth, APIs or integrations, say in one sentence that this mode only answers integration questions, and that /chat on the home page talks about anything.
 - Be brief and practical: at most ~120 words. Plain text; you may use \`code\`, **bold**, and "- " bullets.`;
 
 const SYSTEM = (sheet: string) => `You answer a developer's questions about creating and getting approval for this provider's OAuth app.
@@ -63,7 +56,7 @@ export async function POST(req: Request) {
 
   const key = byo && typeof byo.apiKey === "string" && byo.apiKey.length > 8 && PROVIDERS.some((p) => p.id === byo.provider) ? byo : null;
   if (!key) {
-    const ip = (req.headers.get("x-forwarded-for") ?? "local").split(",")[0].trim();
+    const ip = ipOf(req);
     if (!allow(ip)) return Response.json({ error: `Limit of ${LIMIT} questions an hour on the shared key. Add your own key in model settings to keep going.` }, { status: 429 });
   }
 

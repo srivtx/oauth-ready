@@ -4,6 +4,7 @@ import type { ByoKey } from "@/lib/agent/llm";
 import { findCurated, slugify } from "@/lib/guides";
 import { loadGenerated, saveGuide } from "@/lib/store";
 import type { AgentEvent } from "@/lib/types";
+import { ipOf, limiter } from "@/lib/ratelimit";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -13,15 +14,7 @@ const CACHE_DAYS = 7;
 // Fresh generations on the site's own key are rate-limited per IP (best-effort,
 // per server instance). Cached guides and bring-your-own-key runs are not.
 const LIMIT = Number(process.env.GENERATE_LIMIT_PER_HOUR ?? 8);
-const hits = new Map<string, number[]>();
-function allow(ip: string): boolean {
-  const now = Date.now();
-  const recent = (hits.get(ip) ?? []).filter((t) => now - t < 3600_000);
-  if (recent.length >= LIMIT) return false;
-  recent.push(now);
-  hits.set(ip, recent);
-  return true;
-}
+const allow = limiter(LIMIT);
 
 interface Body {
   query?: string;
@@ -65,7 +58,7 @@ export async function POST(req: Request) {
           send({ type: "done", slug: cached.slug, guide: cached });
           return;
         }
-        const ip = (req.headers.get("x-forwarded-for") ?? "local").split(",")[0].trim();
+        const ip = ipOf(req);
         if (!key && !allow(ip)) {
           send({ type: "error", message: `Limit reached: ${LIMIT} new guides per hour on the shared key. Add your own key with ⚙ to keep going, or try again later.` });
           return;

@@ -11,6 +11,7 @@ import type { AgentEvent } from "@/lib/types";
 import { AnswerText, CopyButton, FactPeek, RichText, streamAsk, streamChat, type ChatMsg } from "./answer";
 import { Difficulty } from "./bits";
 import { Handheld, type Cart } from "./Handheld";
+import { streamAgent } from "./agentStream";
 import { loadByo } from "./ModelSettings";
 import { PixelIcon, type IconName } from "./PixelIcon";
 import { WaitChart } from "./WaitChart";
@@ -139,27 +140,22 @@ const ROUTE: Record<Mode, string> = { investigate: "", ask: "answers it from the
 
 /** Run the live agent for one app (or fetch its cached guide), feeding its events to `on`. */
 async function research(query: string, signal: AbortSignal, on: (e: AgentEvent) => void) {
-  const res = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query, byo: loadByo() }), signal });
-  if (!res.ok || !res.body) throw new Error((await res.json().catch(() => ({}))).error ?? `HTTP ${res.status}`);
-  const reader = res.body.getReader();
-  const dec = new TextDecoder();
-  let buf = "";
   let finished = false;
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    const lines = buf.split("\n");
-    buf = lines.pop() ?? "";
-    for (const l of lines) {
-      if (!l.trim()) continue;
-      const e = JSON.parse(l) as AgentEvent;
-      if (e.type === "error") throw new Error(e.message);
-      if (e.type === "done") finished = true;
-      on(e);
-    }
-  }
-  if (!finished) throw new Error("the agent stopped before finishing");
+  let failed: string | null = null;
+  await streamAgent(
+    query,
+    {},
+    (e) => {
+      if (e.type === "error") failed = e.message;
+      else {
+        if (e.type === "done") finished = true;
+        on(e);
+      }
+    },
+    signal,
+  );
+  if (failed) throw new Error(failed);
+  if (!finished && !signal.aborted) throw new Error("the agent stopped before finishing");
 }
 
 type Turn = { q: string; text: string; model?: string; error?: boolean };
@@ -170,7 +166,7 @@ type Chat = { turns: ChatTurn[]; busy: boolean };
 type Live = { verb: string; detail?: string; tokens: number; t0: number; t1?: number; error?: string };
 /** One app in a comparison: from the library, or researched live by the agent. */
 type Slot = { typed: string; name: string; app?: AppSummary; live?: Live };
-type Cmp = { stage: "reading" | "researching" | "ready"; slots: Slot[]; t0: number; model?: string; note?: string };
+type Cmp = { stage: "reading" | "researching" | "ready"; text: string; slots: Slot[]; t0: number; model?: string; note?: string };
 type Panel = { kind: "ask"; c: Convo } | { kind: "compare"; s: Cmp } | { kind: "chat" } | { kind: "note"; text: string };
 
 const GLYPHS = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"];
@@ -465,12 +461,12 @@ export function SearchBox({ apps, carts }: { apps: AppSummary[]; carts: Cart[] }
     const exact = findApps(text, apps);
     const rest = leftover(text, exact);
     if (exact.length >= 2 && !rest.length) {
-      setPanel({ kind: "compare", s: { stage: "ready", t0: Date.now(), slots: exact.slice(0, 3).map((a) => ({ typed: a.name, name: a.name, app: a })) } });
+      setPanel({ kind: "compare", s: { stage: "ready", text, t0: Date.now(), slots: exact.slice(0, 3).map((a) => ({ typed: a.name, name: a.name, app: a })) } });
       return;
     }
     const ac = new AbortController();
     ctrl.current = ac;
-    let s: Cmp = { stage: "reading", slots: [], t0: Date.now() };
+    let s: Cmp = { stage: "reading", text, slots: [], t0: Date.now() };
     const put = (patch: Partial<Cmp>) => {
       s = { ...s, ...patch };
       if (!ac.signal.aborted) setPanel({ kind: "compare", s });
@@ -855,7 +851,7 @@ export function SearchBox({ apps, carts }: { apps: AppSummary[]; carts: Cart[] }
               ✕
             </button>
             {panel.kind === "ask" && <AskPanel c={panel.c} peek={peek} setPeek={setPeek} />}
-            {panel.kind === "compare" && <ComparePanel s={panel.s} />}
+            {panel.kind === "compare" && <ComparePanel s={panel.s} onRetry={() => void compare(panel.s.text)} />}
             {panel.kind === "chat" && chatLog.turns.length > 0 && (
               <ChatPanel chat={chatLog} onRetry={() => void chat(chatLog.turns[chatLog.turns.length - 1].q, true)} onNew={() => run(COMMANDS.find((c) => c.id === "clear")!)} />
             )}
@@ -910,7 +906,7 @@ function AskPanel({ c, peek, setPeek }: { c: Convo; peek: Fact | null; setPeek: 
   );
 }
 
-function ComparePanel({ s }: { s: Cmp }) {
+function ComparePanel({ s, onRetry }: { s: Cmp; onRetry: () => void }) {
   const ready = s.slots.filter((x) => x.app).map((x) => x.app!);
   const rows: [string, (a: AppSummary) => React.ReactNode][] = [
     ["verdict", (a) => <span className="tag-pixel text-[10px]">{a.label}</span>],
@@ -1021,7 +1017,14 @@ function ComparePanel({ s }: { s: Cmp }) {
           ) : (
             <span>Not enough guides finished to compare.</span>
           )}
-          <span className="text-[10px] text-faint">{s.note ?? (s.model ? `names read by ${s.model}` : "")}</span>
+          <span className="flex items-baseline gap-3 text-[10px] text-faint">
+            {s.note ?? (s.model ? `names read by ${s.model}` : "")}
+            {s.slots.some((x) => x.live?.error) && (
+              <button type="button" onClick={onRetry} className="font-mono text-[11px] text-accent hover:text-white">
+                try again
+              </button>
+            )}
+          </span>
         </div>
       )}
     </div>

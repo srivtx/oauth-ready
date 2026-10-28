@@ -19,13 +19,15 @@ const allow = limiter(LIMIT);
 interface Body {
   query?: string;
   fresh?: boolean;
+  /** Only return an already-saved guide, never start a run (used to recover a dropped stream). */
+  savedOnly?: boolean;
   byo?: ByoKey | null;
 }
 
 // Streams newline-delimited JSON AgentEvents so the UI can show the agent working.
 // A visitor's own key (byo) is used for this request only: never stored or logged.
 export async function POST(req: Request) {
-  const { query, fresh, byo } = (await req.json().catch(() => ({}))) as Body;
+  const { query, fresh, savedOnly, byo } = (await req.json().catch(() => ({}))) as Body;
   const q = (query ?? "").trim();
   if (!q || q.length > 120) return Response.json({ error: "Enter an app name or website (≤120 chars)." }, { status: 400 });
   const key = byo && typeof byo.apiKey === "string" && byo.apiKey.length > 8 && PROVIDERS.some((p) => p.id === byo.provider) ? byo : null;
@@ -56,6 +58,10 @@ export async function POST(req: Request) {
         if (cached && Date.now() - Date.parse(cached.generatedAt) < CACHE_DAYS * 864e5) {
           send({ type: "log", level: "ok", text: `Found a guide generated ${cached.generatedAt.slice(0, 10)} — reusing it (use "re-run agent" on the guide for a fresh one)` });
           send({ type: "done", slug: cached.slug, guide: cached });
+          return;
+        }
+        if (savedOnly) {
+          send({ type: "error", message: "No saved guide yet." });
           return;
         }
         const ip = ipOf(req);

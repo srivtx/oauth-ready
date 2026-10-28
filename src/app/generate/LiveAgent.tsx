@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LogoTile } from "@/components/LogoTile";
-import { loadByo, ModelSettings } from "@/components/ModelSettings";
+import { streamAgent } from "@/components/agentStream";
+import { ModelSettings } from "@/components/ModelSettings";
 import { PixelIcon } from "@/components/PixelIcon";
 import { PixelScatter } from "@/components/pixel";
 import type { AgentEvent, Guide } from "@/lib/types";
@@ -120,24 +121,7 @@ export function LiveAgent() {
 
     (async () => {
       try {
-        const res = await fetch("/api/generate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query: q, fresh, byo: loadByo() }),
-          signal: ac.signal,
-        });
-        if (!res.ok || !res.body) throw new Error((await res.json().catch(() => ({}))).error ?? `HTTP ${res.status}`);
-        const reader = res.body.getReader();
-        const dec = new TextDecoder();
-        let buf = "";
-        for (;;) {
-          const { value, done: end } = await reader.read();
-          if (end) break;
-          buf += dec.decode(value, { stream: true });
-          const parts = buf.split("\n");
-          buf = parts.pop() ?? "";
-          for (const p of parts) if (p.trim()) handle(JSON.parse(p) as AgentEvent);
-        }
+        await streamAgent(q, { fresh }, handle, ac.signal);
       } catch (err) {
         if (!ac.signal.aborted) {
           setError((err as Error).message);

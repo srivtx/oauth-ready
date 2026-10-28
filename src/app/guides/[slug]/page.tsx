@@ -7,14 +7,13 @@ import { LogoTile, Mark } from "@/components/LogoTile";
 import { ShareBar } from "@/components/ShareBar";
 import { Steps } from "@/components/Steps";
 import { Timeline } from "@/components/Timeline";
-import { CURATED } from "@/lib/guides";
 import { factsOf } from "@/lib/facts";
 import { toMarkdown } from "@/lib/markdown";
 import { getGuide } from "@/lib/store";
 import type { Evidence, Guide } from "@/lib/types";
 
-export const dynamicParams = true;
-export const generateStaticParams = () => CURATED.map((g) => ({ slug: g.slug }));
+// Rendered per request: agent-generated guides live in Blob storage and appear after build.
+export const dynamic = "force-dynamic";
 
 type Props = { params: Promise<{ slug: string }> };
 

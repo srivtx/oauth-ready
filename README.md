@@ -216,7 +216,7 @@ npm run dev                   # http://localhost:3000
 - **Cost and abuse.** Each new guide costs the site owner 2–5¢. Results are cached for 7 days, and runs and questions on the shared key are capped per IP. The caps are in-memory and per server instance; put a real rate limiter in front for wide public use.
 - **Quote checks prove a sentence exists, not that it fully supports the claim.** A strong filter against invented citations, not a substitute for human review.
 - **Generated guides are unreviewed.** Their time estimates are usually `inferred`, and the chart inherits that (its detail line says how much).
-- **JS-only docs** can't be read by the fetcher; the agent says when sources were thin.
+- **JS-only docs** get a second read in a real browser, but some still come back empty, and web search runs on Exa's free tier unless `EXA_API_KEY` is set; the agent says when sources were thin.
 - **Five curated apps, not 100.** Scaling plan: run the agent over Composio's OAuth toolkit list, have a person review the inferred claims before a guide gets the verified stamp, and re-run on a schedule to catch provider changes.
 - Not legal or compliance advice.
 

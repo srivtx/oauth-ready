@@ -369,3 +369,13 @@ a {
     animation: none;
   }
 }
+
+/* The 404 is shorter than the screen: let its page fill the height so the footer sits at the
+   bottom. Scoped to that page only. */
+body:has(main[data-lost]) {
+  display: flex;
+  flex-direction: column;
+}
+body:has(main[data-lost]) > main {
+  flex: 1;
+}

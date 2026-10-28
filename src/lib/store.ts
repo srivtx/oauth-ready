@@ -26,6 +26,10 @@ export async function saveGuide(guide: Guide): Promise<void> {
   await fs.writeFile(path.join(DIR, `${guide.slug}.json`), body);
 }
 
+// Storage calls occasionally stall for many seconds; never let one hold up a page.
+const timed = <T,>(p: Promise<T>, ms = 8000): Promise<T> =>
+  Promise.race([p, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("storage timeout")), ms))]);
+
 // A stored guide only changes when it's re-saved, which gives it a new upload time. Keep each
 // one's parsed JSON per server instance under that time, so pages only download what changed.
 const fetched = new Map<string, { at: number; guide: Promise<Guide | null> }>();
@@ -33,10 +37,13 @@ function fetchGuide(url: string, uploadedAt: Date): Promise<Guide | null> {
   const at = uploadedAt.getTime();
   const hit = fetched.get(url);
   if (hit && hit.at === at) return hit.guide;
-  // The version in the query also skips a CDN copy of the file from before it was re-saved.
-  const guide = fetch(`${url}?v=${at}`, { cache: "no-store" })
-    .then((r) => (r.ok ? r : fetch(url, { cache: "no-store" })))
-    .then((r) => (r.ok ? (r.json() as Promise<Guide>) : null))
+  // The version in the query also skips a CDN copy of the file from before it was re-saved, and
+  // makes the URL immutable, so it's safe to keep in Next's data cache across requests.
+  const guide = timed(
+    fetch(`${url}?v=${at}`, { cache: "force-cache" })
+      .then((r) => (r.ok ? r : fetch(url, { next: { revalidate: 60 } })))
+      .then((r) => (r.ok ? (r.json() as Promise<Guide>) : null)),
+  )
     .catch(() => null)
     .then((g) => {
       if (!g && fetched.get(url)?.at === at) fetched.delete(url); // don't remember a failure
@@ -51,7 +58,7 @@ export async function loadGenerated(slug: string): Promise<Guide | null> {
   try {
     if (blobEnabled()) {
       const { head } = await import("@vercel/blob");
-      const meta = await head(blobKey(slug));
+      const meta = await head(blobKey(slug), { abortSignal: AbortSignal.timeout(8000) });
       return await fetchGuide(meta.url, meta.uploadedAt);
     }
     return JSON.parse(await fs.readFile(path.join(DIR, `${slug}.json`), "utf8")) as Guide;
@@ -64,7 +71,7 @@ export async function listGenerated(): Promise<Guide[]> {
   try {
     if (blobEnabled()) {
       const { list } = await import("@vercel/blob");
-      const { blobs } = await list({ prefix: "guides/" });
+      const { blobs } = await list({ prefix: "guides/", abortSignal: AbortSignal.timeout(8000) });
       const guides = await Promise.all(blobs.map((b) => fetchGuide(b.url, b.uploadedAt)));
       return guides.filter((g): g is Guide => g !== null);
     }

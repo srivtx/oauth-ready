@@ -12,7 +12,9 @@ import { listGenerated } from "@/lib/store";
 import { summarize } from "@/lib/summary";
 import type { Guide } from "@/lib/types";
 
-export const dynamic = "force-dynamic";
+// Served ready-made and refreshed in the background every minute (and right away when the agent
+// saves a guide), so a visit never waits on Blob storage.
+export const revalidate = 60;
 
 export default async function Home() {
   const generated = (await listGenerated()).filter((g) => !CURATED.some((c) => c.slug === g.slug));

@@ -12,8 +12,10 @@ import { toMarkdown } from "@/lib/markdown";
 import { getGuide } from "@/lib/store";
 import type { Evidence, Guide } from "@/lib/types";
 
-// Rendered per request: agent-generated guides live in Blob storage and appear after build.
-export const dynamic = "force-dynamic";
+// Agent-generated guides live in Blob storage and appear after build: each page is rendered on its
+// first visit, then served ready-made, refreshed every few minutes and right after a re-run saves it.
+export const revalidate = 300;
+export const generateStaticParams = async () => [];
 
 type Props = { params: Promise<{ slug: string }> };
 

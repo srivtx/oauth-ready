@@ -1,3 +1,5 @@
+import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { runAgent } from "@/lib/agent/run";
 import { PROVIDERS } from "@/lib/agent/providers";
 import type { ByoKey } from "@/lib/agent/llm";
@@ -31,6 +33,15 @@ export async function POST(req: Request) {
   const q = (query ?? "").trim();
   if (!q || q.length > 120) return Response.json({ error: "Enter an app name or website (≤120 chars)." }, { status: 400 });
   const key = byo && typeof byo.apiKey === "string" && byo.apiKey.length > 8 && PROVIDERS.some((p) => p.id === byo.provider) ? byo : null;
+
+  // The home page and the guide are served ready-made: once a new guide is saved, refresh them
+  // right away. Revalidation has to run after the streamed response ends, not inside the stream.
+  let saved: string | null = null;
+  after(() => {
+    if (!saved) return;
+    revalidatePath("/");
+    revalidatePath(`/guides/${saved}`);
+  });
 
   const encoder = new TextEncoder();
   const abort = new AbortController();
@@ -71,6 +82,8 @@ export async function POST(req: Request) {
         }
         const guide = await runAgent(q, { emit: send, byo: key, signal: abort.signal });
         await saveGuide(guide);
+        // The home page and this guide are served ready-made: refresh them now, not in a few minutes.
+        saved = guide.slug;
         send({ type: "log", level: "ok", text: `Saved — shareable at /guides/${guide.slug}` });
         send({ type: "done", slug: guide.slug, guide });
       } catch (e) {

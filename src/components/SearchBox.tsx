@@ -13,6 +13,7 @@ import { Difficulty } from "./bits";
 import { Handheld, type Cart } from "./Handheld";
 import { streamAgent } from "./agentStream";
 import { loadByo } from "./ModelSettings";
+import { navStart } from "./NavProgress";
 import { PixelIcon, type IconName } from "./PixelIcon";
 import { WaitChart } from "./WaitChart";
 
@@ -382,6 +383,7 @@ export function SearchBox({ apps, carts }: { apps: AppSummary[]; carts: Cart[] }
       .replace(/^https?:\/\//, "")
       .replace(/^www\./, "")
       .replace(/\..*$/, "");
+    navStart();
     if (apps.some((a) => a.origin === "curated" && a.slug === slug)) router.push(`/guides/${slug}`);
     else router.push(`/generate?q=${encodeURIComponent(v)}`);
   };
@@ -568,6 +570,7 @@ export function SearchBox({ apps, carts }: { apps: AppSummary[]; carts: Cart[] }
     if (c.id === "play") setPlay(true);
     else if (c.id === "random") {
       const pool = apps.filter((a) => a.origin === "curated");
+      navStart();
       router.push(`/guides/${pool[Math.floor(Math.random() * pool.length)].slug}`);
     } else if (c.id === "model") window.dispatchEvent(new Event("oauthready:model"));
     else if (c.id === "clear") {

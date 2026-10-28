@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { LogoTile } from "@/components/LogoTile";
 import { streamAgent } from "@/components/agentStream";
 import { ModelSettings } from "@/components/ModelSettings";
+import { navStart } from "@/components/NavProgress";
 import { PixelIcon } from "@/components/PixelIcon";
 import { PixelScatter } from "@/components/pixel";
 import type { AgentEvent, Guide } from "@/lib/types";
@@ -173,6 +174,7 @@ function Run({ q, fresh }: { q: string; fresh: boolean }) {
     if (!done || !autoOpen) return;
     if (countdown <= 0) {
       // Replace, so Back from the guide doesn't land here and start the run (and redirect) again.
+      navStart();
       router.replace(`/guides/${done.slug}`);
       return;
     }

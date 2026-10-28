@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { brandOf } from "@/lib/brand";
 import type { Guide } from "@/lib/types";
+import { navStart } from "./NavProgress";
 
 export type Cart = Pick<Guide, "slug" | "name" | "logo" | "brandColor"> & { difficulty: Guide["verdict"]["difficulty"] };
 
@@ -233,7 +234,10 @@ export function Handheld({ carts }: { carts: Cart[] }) {
       if (k === "a" || k === "start") game.current = start(g.cart, cartOf(g).difficulty);
       else game.current = menu(g.cart);
     } else if (g.mode === "won") {
-      if (k === "a" || k === "start") router.push(`/guides/${cartOf(g).slug}`);
+      if (k === "a" || k === "start") {
+        navStart();
+        router.push(`/guides/${cartOf(g).slug}`);
+      }
       else game.current = menu(g.cart);
     }
   };

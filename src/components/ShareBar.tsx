@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { navStart } from "./NavProgress";
 
 export function ShareBar({ markdown, slug, name, canRegenerate }: { markdown: string; slug: string; name: string; canRegenerate: boolean }) {
   const [msg, setMsg] = useState("");
@@ -35,7 +36,10 @@ export function ShareBar({ markdown, slug, name, canRegenerate }: { markdown: st
         print / pdf
       </button>
       {canRegenerate && (
-        <button className={`${btn} border-agent/40 text-agent`} onClick={() => router.push(`/generate?q=${encodeURIComponent(name)}&fresh=1`)}>
+        <button className={`${btn} border-agent/40 text-agent`} onClick={() => {
+            navStart();
+            router.push(`/generate?q=${encodeURIComponent(name)}&fresh=1`);
+          }}>
           ↻ re-run agent
         </button>
       )}

@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { JetBrains_Mono, Silkscreen, Space_Grotesk } from "next/font/google";
 import Link from "next/link";
+import { Suspense } from "react";
+import { NavProgress } from "@/components/NavProgress";
 import { TetrisFloor } from "@/components/TetrisFloor";
 import "./globals.css";
 
@@ -17,6 +19,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en">
       <body className={`${grotesk.variable} ${mono.variable} ${pixel.variable} min-h-screen`}>
+        <Suspense>
+          <NavProgress />
+        </Suspense>
         <header className="no-print sticky top-0 z-20 border-b border-line bg-bg/85 backdrop-blur">
           <nav data-dim className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3 sm:gap-6 sm:px-6">
             <Link href="/" className="brand flex items-center gap-2 font-pixel text-sm tracking-tight">

@@ -1,5 +1,6 @@
 import { promises as fs } from "fs";
 import path from "path";
+import { cache } from "react";
 import type { Guide } from "./types";
 import { CURATED } from "./guides";
 
@@ -63,6 +64,5 @@ export async function listGenerated(): Promise<Guide[]> {
   }
 }
 
-export async function getGuide(slug: string): Promise<Guide | null> {
-  return CURATED.find((g) => g.slug === slug) ?? (await loadGenerated(slug));
-}
+// Once per request: a guide page's metadata and body both ask for it, and each miss is a Blob round trip.
+export const getGuide = cache(async (slug: string): Promise<Guide | null> => CURATED.find((g) => g.slug === slug) ?? (await loadGenerated(slug)));

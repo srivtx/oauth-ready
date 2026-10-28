@@ -26,14 +26,33 @@ export async function saveGuide(guide: Guide): Promise<void> {
   await fs.writeFile(path.join(DIR, `${guide.slug}.json`), body);
 }
 
+// A stored guide only changes when it's re-saved, which gives it a new upload time. Keep each
+// one's parsed JSON per server instance under that time, so pages only download what changed.
+const fetched = new Map<string, { at: number; guide: Promise<Guide | null> }>();
+function fetchGuide(url: string, uploadedAt: Date): Promise<Guide | null> {
+  const at = uploadedAt.getTime();
+  const hit = fetched.get(url);
+  if (hit && hit.at === at) return hit.guide;
+  // The version in the query also skips a CDN copy of the file from before it was re-saved.
+  const guide = fetch(`${url}?v=${at}`, { cache: "no-store" })
+    .then((r) => (r.ok ? r : fetch(url, { cache: "no-store" })))
+    .then((r) => (r.ok ? (r.json() as Promise<Guide>) : null))
+    .catch(() => null)
+    .then((g) => {
+      if (!g && fetched.get(url)?.at === at) fetched.delete(url); // don't remember a failure
+      return g;
+    });
+  fetched.set(url, { at, guide });
+  return guide;
+}
+
 export async function loadGenerated(slug: string): Promise<Guide | null> {
   if (!/^[a-z0-9-]{1,80}$/.test(slug)) return null;
   try {
     if (blobEnabled()) {
       const { head } = await import("@vercel/blob");
       const meta = await head(blobKey(slug));
-      const res = await fetch(meta.url, { cache: "no-store" });
-      return res.ok ? ((await res.json()) as Guide) : null;
+      return await fetchGuide(meta.url, meta.uploadedAt);
     }
     return JSON.parse(await fs.readFile(path.join(DIR, `${slug}.json`), "utf8")) as Guide;
   } catch {
@@ -46,12 +65,7 @@ export async function listGenerated(): Promise<Guide[]> {
     if (blobEnabled()) {
       const { list } = await import("@vercel/blob");
       const { blobs } = await list({ prefix: "guides/" });
-      const guides = await Promise.all(
-        blobs.map(async (b) => {
-          const r = await fetch(b.url, { cache: "no-store" });
-          return r.ok ? ((await r.json()) as Guide) : null;
-        }),
-      );
+      const guides = await Promise.all(blobs.map((b) => fetchGuide(b.url, b.uploadedAt)));
       return guides.filter((g): g is Guide => g !== null);
     }
     const files = await fs.readdir(DIR);

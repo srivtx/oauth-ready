@@ -57,6 +57,18 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Selected text in the site's pink, with the same dark ink as the pink buttons. On pink itself
+   it flips, so a selection never disappears into its background. */
+::selection {
+  background: var(--accent);
+  color: #13221a;
+}
+.bg-accent::selection,
+.bg-accent ::selection {
+  background: #13221a;
+  color: var(--accent);
+}
+
 /* Film/paper grain, as in risograph posters. Layered on top of any background. */
 .grain {
   position: relative;

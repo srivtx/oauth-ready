@@ -61,7 +61,11 @@ export async function streamAgent(query: string, opts: { fresh?: boolean }, on: 
       on({ type: "done", slug: g.slug, guide: g });
       return;
     }
-    await new Promise((r) => setTimeout(r, 5000));
+    // Wait between looks, but stop waiting the moment the run is cancelled.
+    await new Promise<void>((r) => {
+      const id = setTimeout(r, 5000);
+      signal.addEventListener("abort", () => (clearTimeout(id), r()), { once: true });
+    });
   }
   if (!signal.aborted) throw new Error("The connection to the agent dropped before the guide arrived. Try again.");
 }

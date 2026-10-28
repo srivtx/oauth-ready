@@ -40,6 +40,8 @@ export function AskGuide({ slug, name, facts, suggestions }: { slug: string; nam
   useEffect(() => {
     list.current?.scrollTo({ top: list.current.scrollHeight });
   }, [msgs]);
+  // Leaving the guide stops an answer that's still streaming.
+  useEffect(() => () => ctrl.current?.abort(), []);
 
   const ask = async (text: string) => {
     const question = text.trim();

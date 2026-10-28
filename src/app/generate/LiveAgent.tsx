@@ -31,9 +31,14 @@ const DOT = { run: "text-muted pulse-dot", ok: "text-tested", warn: "text-you", 
 
 export function LiveAgent() {
   const params = useSearchParams();
-  const router = useRouter();
   const q = params.get("q") ?? "";
   const fresh = params.get("fresh") === "1";
+  // A new query is a new run: start from a clean slate rather than reusing the last one's state.
+  return <Run key={`${fresh}:${q}`} q={q} fresh={fresh} />;
+}
+
+function Run({ q, fresh }: { q: string; fresh: boolean }) {
+  const router = useRouter();
 
   const [step, setStep] = useState<string | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -49,7 +54,6 @@ export function LiveAgent() {
   const [glyph, setGlyph] = useState(0);
   const [autoOpen, setAutoOpen] = useState(true);
   const [countdown, setCountdown] = useState(4);
-  const started = useRef(false);
   const t0 = useRef(Date.now());
   const ctrl = useRef<AbortController | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
@@ -64,8 +68,7 @@ export function LiveAgent() {
 
   // Stream the agent run.
   useEffect(() => {
-    if (!q || started.current) return;
-    started.current = true;
+    if (!q) return;
     t0.current = Date.now();
     const ac = new AbortController();
     ctrl.current = ac;
@@ -119,7 +122,9 @@ export function LiveAgent() {
       }
     };
 
-    (async () => {
+    // Start on the next tick, so React's dev double-mount doesn't launch two runs. Leaving the
+    // page stops the run instead of leaving it streaming in the background.
+    const id = setTimeout(async () => {
       try {
         await streamAgent(q, { fresh }, handle, ac.signal);
       } catch (err) {
@@ -128,7 +133,11 @@ export function LiveAgent() {
           setTools((m) => Object.fromEntries(Object.entries(m).map(([k, t]) => [k, t.status === "run" ? { ...t, status: "err", result: "connection lost" } : t])));
         }
       }
-    })();
+    }, 0);
+    return () => {
+      clearTimeout(id);
+      ac.abort();
+    };
   }, [q, fresh]);
 
   // Spinner + clock.
@@ -163,7 +172,8 @@ export function LiveAgent() {
   useEffect(() => {
     if (!done || !autoOpen) return;
     if (countdown <= 0) {
-      router.push(`/guides/${done.slug}`);
+      // Replace, so Back from the guide doesn't land here and start the run (and redirect) again.
+      router.replace(`/guides/${done.slug}`);
       return;
     }
     const t = setTimeout(() => setCountdown((c) => c - 1), 1000);

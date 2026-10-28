@@ -20,10 +20,12 @@ export async function saveGuide(guide: Guide): Promise<void> {
       addRandomSuffix: false,
       allowOverwrite: true,
     });
+    listed = null;
     return;
   }
   await fs.mkdir(DIR, { recursive: true });
   await fs.writeFile(path.join(DIR, `${guide.slug}.json`), body);
+  listed = null;
 }
 
 // Storage calls occasionally stall for many seconds; never let one hold up a page.
@@ -67,7 +69,23 @@ export async function loadGenerated(slug: string): Promise<Guide | null> {
   }
 }
 
-export async function listGenerated(): Promise<Guide[]> {
+// /ask, /compare and /chat read the whole library on every message: share one listing per server
+// instance for a little while. Saving a guide here clears it.
+let listed: { at: number; guides: Promise<Guide[]> } | null = null;
+const LIST_TTL = 30_000;
+
+export function listGenerated(): Promise<Guide[]> {
+  if (listed && Date.now() - listed.at < LIST_TTL) return listed.guides;
+  const guides = listFresh();
+  listed = { at: Date.now(), guides };
+  // An empty result may be a storage hiccup: don't keep it.
+  guides.then((g) => {
+    if (!g.length && listed?.guides === guides) listed = null;
+  });
+  return guides;
+}
+
+async function listFresh(): Promise<Guide[]> {
   try {
     if (blobEnabled()) {
       const { list } = await import("@vercel/blob");

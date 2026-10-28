@@ -21,7 +21,7 @@ type Props = { params: Promise<{ slug: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const g = await getGuide((await params).slug);
-  return g ? { title: `${g.name} OAuth guide — ${g.verdict.label} · OAuth Ready`, description: g.verdict.headline } : {};
+  return g ? { title: `${g.name} OAuth guide — ${g.verdict.label} · OAuth Ready`, description: g.verdict.headline } : { title: "Not found · OAuth Ready" };
 }
 
 export default async function GuidePage({ params }: Props) {

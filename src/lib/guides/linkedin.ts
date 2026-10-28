@@ -1,0 +1,175 @@
+import type { Guide } from "../types";
+import { CHECKED, composioSource, probeSource, src } from "./common";
+
+export const linkedin: Guide = {
+  slug: "linkedin",
+  name: "LinkedIn",
+  website: "https://linkedin.com",
+  category: "Social / marketing",
+  origin: "curated",
+  generatedAt: CHECKED,
+  verdict: {
+    difficulty: 4,
+    label: "Partner-gated",
+    headline:
+      "Sign-in and posting as a member are instant. Anything with company pages, ads or analytics requires LinkedIn to vet your business, and a rejection means starting over with a new app.",
+  },
+  timeToDev: "~30 minutes (Sign In + Share on LinkedIn)",
+  timeToProd: "Member features: same day · Org pages: vetting + Development tier + Standard tier review (no SLA)",
+  managed: {
+    composio: true,
+    note: "Composio offers a managed LinkedIn app. Check which LinkedIn products/scopes it includes before relying on it for page management.",
+  },
+  paths: [
+    {
+      name: "Self-serve products",
+      when: "Sign in with LinkedIn (openid, profile, email) and posting as the member (w_member_social).",
+      outcome: "Add from the Products tab and it's available immediately.",
+    },
+    {
+      name: "Community Management API",
+      when: "Post/read as a company Page, comments, analytics.",
+      outcome: "Access request vetted by LinkedIn → Development tier (rate-limited, 12-month build window) → Standard tier review with screencast.",
+    },
+    {
+      name: "Other partner programs (Ads, Sales Navigator, Talent)",
+      when: "Marketing, sales, or recruiting integrations.",
+      outcome: "Separate applications. Some are closed to new partners.",
+    },
+  ],
+  phases: [
+    { label: "Create app, associate a LinkedIn Page, add self-serve products", kind: "work", owner: "you", min: 15, max: 30, unit: "minutes", milestone: "dev", evidence: "sourced", sources: ["li-access"] },
+    { label: "Page admin verifies the app", kind: "wait", owner: "you", min: 0, max: 2, unit: "days", milestone: "prod", evidence: "sourced", sources: ["li-cmreview"], note: "Needs a super admin of the company Page." },
+    { label: "Development tier access request vetting", kind: "wait", owner: "provider", min: 1, max: 4, unit: "weeks", milestone: "prod", evidence: "inferred", sources: ["li-cmreview"], note: "No published SLA." },
+    { label: "Build integration under Development tier limits", kind: "work", owner: "agent", min: 1, max: 3, unit: "weeks", milestone: "prod", evidence: "inferred", sources: ["li-increase"] },
+    { label: "Standard tier review (screencast + test creds)", kind: "wait", owner: "provider", min: 2, max: 6, unit: "weeks", milestone: "prod", evidence: "inferred", sources: ["li-cmreview"], note: "No published SLA." },
+  ],
+  steps: [
+    {
+      title: "Map features to LinkedIn products before writing code",
+      owner: "agent",
+      milestone: "dev",
+      detail: "Member sign-in and posting as yourself are self-serve. Company Page posting/analytics is Community Management API. Ads/Sales/Talent are partner programs. This mapping decides whether you wait.",
+      evidence: "sourced",
+      sources: ["li-access", "li-increase"],
+    },
+    {
+      title: "Create the app in the Developer Portal",
+      owner: "you",
+      milestone: "dev",
+      detail: "Associate it with your company's LinkedIn Page. A Page super admin must verify the association.",
+      url: "https://www.linkedin.com/developers/apps/new",
+      evidence: "sourced",
+      sources: ["li-cmreview"],
+    },
+    {
+      title: "Add 'Sign In with LinkedIn using OpenID Connect' and 'Share on LinkedIn'",
+      owner: "you",
+      milestone: "dev",
+      detail: "Products tab. Grants openid/profile/email and w_member_social without approval.",
+      evidence: "sourced",
+      sources: ["li-access"],
+    },
+    {
+      title: "Check your use case isn't restricted",
+      owner: "agent",
+      milestone: "prod",
+      detail: "LinkedIn lists restricted use cases (e.g. scraping-like or data-resale patterns). An agent can compare your product description against them before you apply.",
+      url: "https://learn.microsoft.com/en-us/linkedin/marketing/restricted-use-cases",
+      evidence: "sourced",
+      sources: ["li-cmreview"],
+    },
+    {
+      title: "Apply for Community Management API (Development tier)",
+      owner: "you",
+      milestone: "prod",
+      detail: "Registered legal organization, commercial use case only. Have ready: verified business email, legal name, registered address, website, privacy policy.",
+      evidence: "sourced",
+      sources: ["li-cmreview"],
+    },
+    {
+      title: "Build within Development tier limits, then apply for Standard",
+      owner: "you",
+      milestone: "prod",
+      detail: "Development tier is rate-limited and expects you to finish within 12 months. Standard needs a narrated screencast of each use case (incl. full OAuth flow) and test credentials.",
+      evidence: "sourced",
+      sources: ["li-increase", "li-cmreview"],
+      artifact: {
+        label: "Screencast checklist (Standard tier)",
+        kind: "text",
+        content:
+          "1. Close all other windows. Record only your app.\n2. Narrate throughout.\n3. Show a user approving access to their LinkedIn Page via the full OAuth flow (consent screen visible).\n4. Show posting to the Page via your app.\n5. Show each additional use case you selected in the form (e.g. reading comments, analytics).",
+      },
+    },
+  ],
+  requirements: [
+    { text: "Community Management API: registered legal organization, commercial use only.", evidence: "sourced", sources: ["li-cmreview"] },
+    { text: "Verified business email, legal name, registered address, website and privacy policy.", evidence: "sourced", sources: ["li-cmreview"] },
+    { text: "App verified by a super admin of the organization's LinkedIn Page.", evidence: "sourced", sources: ["li-cmreview"] },
+    { text: "Development tier: limited API calls per 24h (500/app). Integration must be completed within 12 months.", evidence: "sourced", sources: ["li-increase"] },
+  ],
+  scopes: [
+    { name: "openid profile email", tier: "basic", note: "Sign In with LinkedIn (OIDC). Self-serve.", evidence: "sourced", sources: ["li-access"] },
+    { name: "w_member_social", tier: "basic", note: "Post/comment/like as the member. Self-serve.", evidence: "sourced", sources: ["li-access"] },
+    { name: "w_organization_social, r_organization_social, …", tier: "gated", note: "Community Management API. Vetted access.", evidence: "sourced", sources: ["li-increase"] },
+    { name: "r_compliance / w_compliance", tier: "gated", note: "Closed. Cannot be requested.", evidence: "sourced", sources: ["li-access"] },
+  ],
+  gotchas: [
+    { text: "Rejected? You can't re-apply with the same app. LinkedIn says to create a new app and submit a new request.", evidence: "sourced", sources: ["li-cmreview"] },
+    { text: "Changes to your app's functionality after review may require re-review.", evidence: "sourced", sources: ["li-cmreview"] },
+    { text: "LinkedIn may decline to upgrade you 'at its discretion' even if you meet the minimum criteria.", evidence: "sourced", sources: ["li-increase"] },
+    { text: "Marketing API versions sunset on a schedule (e.g. 202511 sunsets Nov 16, 2026). Pin and track versions.", evidence: "sourced", sources: ["li-increase"] },
+  ],
+  blockers: [
+    {
+      problem: "Need company-page features but you're a solo developer or pre-incorporation.",
+      fix: "Community Management API requires a registered legal org. Ship member-level features (w_member_social) first, or use a managed provider whose app already has access, if its terms allow.",
+      evidence: "sourced",
+      sources: ["li-cmreview", "composio"],
+    },
+    {
+      problem: "Development tier rate limits during testing.",
+      fix: "Cache aggressively, test with few members, and move to Standard tier only after the integration is complete (the form requires it).",
+      evidence: "sourced",
+      sources: ["li-increase", "li-cmreview"],
+    },
+  ],
+  probes: [
+    {
+      label: "OIDC discovery document",
+      url: "https://www.linkedin.com/oauth/.well-known/openid-configuration",
+      status: 200,
+      observed: "authorization_endpoint = https://www.linkedin.com/oauth/v2/authorization",
+      meaning: "Standard OIDC for sign-in. Endpoints confirmed.",
+      at: CHECKED,
+    },
+    {
+      label: "Authorize endpoint with a fake client_id",
+      url: "https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=probe_invalid&scope=openid",
+      status: 200,
+      observed: "HTML page returned",
+      meaning: "Endpoint is live and validates the client in its UI.",
+      at: CHECKED,
+    },
+    {
+      label: "Old docs URL",
+      url: "https://learn.microsoft.com/en-us/linkedin/marketing/community-management/community-management-api-access",
+      status: 404,
+      observed: "Page not found",
+      meaning: "Access docs moved to /linkedin/marketing/community-management-app-review. Older guides link dead pages.",
+      at: CHECKED,
+    },
+  ],
+  sources: [
+    src("li-access", "LinkedIn (Microsoft Learn) — Getting access to LinkedIn APIs", "https://learn.microsoft.com/en-us/linkedin/shared/authentication/getting-access"),
+    src("li-increase", "LinkedIn — Increasing access (Marketing API tiers)", "https://learn.microsoft.com/en-us/linkedin/marketing/increasing-access"),
+    src("li-cmreview", "LinkedIn — Community Management App Review", "https://learn.microsoft.com/en-us/linkedin/marketing/community-management-app-review"),
+    composioSource,
+    probeSource,
+  ],
+  uncertainties: [
+    "LinkedIn publishes no review SLA for Development or Standard tier. Our week ranges are estimates.",
+    "We could not confirm which LinkedIn products Composio's managed app has been granted.",
+    "We did not submit an access request.",
+  ],
+};

@@ -1,26 +1,359 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Green-black base, grain-green panels, pale pink pixel accents. */
+  --bg: #0a100c;
+  --panel: #101812;
+  --panel-2: #152018;
+  --line: #22322a;
+  --text: #ecefe9;
+  --muted: #93a197;
+  --faint: #5d6c62;
+  --accent: #f7b9e4; /* pixel pink */
+  --hot: #ff6fcf;
+  --field: #2e9a5d; /* grain green */
+  --field-deep: #1f6e41;
+  --agent: #5fe0c8;
+  --you: #f5b041;
+  --provider: #b49bff;
+  --tested: #62e08a;
+  --sourced: #7cb4ff;
+  --inferred: #93a197;
+  --danger: #ff7b7b;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-line: var(--line);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-hot: var(--hot);
+  --color-field: var(--field);
+  --color-field-deep: var(--field-deep);
+  --color-agent: var(--agent);
+  --color-you: var(--you);
+  --color-provider: var(--provider);
+  --color-tested: var(--tested);
+  --color-sourced: var(--sourced);
+  --color-inferred: var(--inferred);
+  --color-danger: var(--danger);
+  --font-sans: var(--font-grotesk);
+  --font-mono: var(--font-jetbrains);
+  --font-pixel: var(--font-silkscreen);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: dark;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-grotesk), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Film/paper grain, as in risograph posters. Layered on top of any background. */
+.grain {
+  position: relative;
+  isolation: isolate;
+}
+.grain::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit; /* follow rounded corners instead of poking out as a square */
+  pointer-events: none;
+  opacity: 0.55;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='1.15' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+.field {
+  background-color: var(--field);
+  color: #f4fff6;
+}
+
+/* Pink label box, like a printed tag. */
+.tag-pixel {
+  display: inline-block;
+  background: var(--accent);
+  color: #13221a;
+  font-family: var(--font-silkscreen), monospace;
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  padding: 5px 7px 4px;
+  text-transform: uppercase;
+}
+
+.pixelated {
+  image-rendering: pixelated;
+}
+
+/* faint grid like a briefing sheet */
+.grid-bg {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.hatch {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--provider) 55%, transparent) 0 4px,
+    color-mix(in srgb, var(--provider) 18%, transparent) 4px 9px
+  );
+}
+
+.caret::after {
+  content: "▋";
+  margin-left: 2px;
+  animation: blink 1s steps(1) infinite;
+  color: var(--accent);
+}
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+a {
+  text-underline-offset: 3px;
+}
+
+@media print {
+  body {
+    background: #fff;
+    color: #111;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
+
+/* Claude Code–style shimmer for the live status verb */
+.shimmer {
+  background: linear-gradient(90deg, var(--accent) 0%, #ffffff 45%, var(--accent) 55%, var(--accent) 100%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 2.2s linear infinite;
+}
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -150% 0;
+  }
+}
+
+.fade-in {
+  animation: fadein 0.25s ease-out both;
+}
+@keyframes fadein {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
+
+.pulse-dot {
+  animation: pulsedot 1s ease-in-out infinite;
+}
+@keyframes pulsedot {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shimmer,
+  .fade-in,
+  .pulse-dot,
+  .caret::after {
+    animation: none;
+  }
+  .shimmer {
+    color: var(--accent);
+  }
+}
+
+/* OAUTH chase: each move is a little jump; leaps across letter gaps arc higher. */
+.leap {
+  animation: leap 210ms cubic-bezier(0.3, 0, 0.3, 1);
+}
+.leap-far {
+  animation: leap-far 210ms cubic-bezier(0.3, 0, 0.3, 1);
+}
+@keyframes leap {
+  50% {
+    transform: translateY(-0.35px);
+  }
+}
+@keyframes leap-far {
+  50% {
+    transform: translateY(-0.9px);
+  }
+}
+.busted {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: busted 0.9s steps(2) both;
+}
+@keyframes busted {
+  0%,
+  50% {
+    transform: scale(1.25);
+  }
+  100% {
+    transform: scale(0.2);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .leap,
+  .leap-far,
+  .busted {
+    animation: none;
+  }
+}
+
+/* Header mark: on hover the 2×2 piece rotates in quarter turns, Tetris-style, and the empty slot blinks. */
+.brand:hover .logo-mark,
+.brand:focus-visible .logo-mark {
+  animation: logo-turn 1.6s steps(1) infinite;
+}
+.brand:hover .logo-mark > :nth-child(2),
+.brand:focus-visible .logo-mark > :nth-child(2) {
+  animation: logo-blink 0.4s steps(1) infinite;
+}
+@keyframes logo-turn {
+  0% {
+    transform: rotate(90deg);
+  }
+  25% {
+    transform: rotate(180deg);
+  }
+  50% {
+    transform: rotate(270deg);
+  }
+  75% {
+    transform: rotate(360deg);
+  }
+}
+@keyframes logo-blink {
+  0% {
+    background: var(--hot);
+  }
+  50% {
+    background: transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .brand:hover .logo-mark,
+  .brand:hover .logo-mark > :nth-child(2) {
+    animation: none;
+  }
+}
+
+/* Pixel icons: hovering their card makes the pixels pop in a diagonal wave. */
+.px-icon rect {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.group:hover .px-icon rect {
+  animation: px-pop 0.45s steps(3) both;
+}
+@keyframes px-pop {
+  0% {
+    transform: scale(0.3);
+  }
+  60% {
+    transform: scale(1.15);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .group:hover .px-icon rect {
+    animation: none;
+  }
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Tetris pieces that hit text break into pixels: shards hop up and out, then fall and fade. */
+.shard {
+  animation: shard 0.7s steps(6) forwards;
+}
+@keyframes shard {
+  40% {
+    transform: translate(var(--dx), var(--dy));
+    opacity: 1;
+  }
+  100% {
+    transform: translate(calc(var(--dx) * 1.5), calc(var(--dy) * -1.2));
+    opacity: 0;
+  }
+}
+
+/* Search focus mode: everything marked data-dim eases back while you type. */
+[data-dim] {
+  transition:
+    filter 0.45s cubic-bezier(0.2, 0.7, 0.2, 1),
+    opacity 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.search-focus [data-dim] {
+  filter: blur(3px) saturate(0.7);
+  opacity: 0.35;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-dim] {
+    transition: none;
+  }
+}
+
+/* A pixel running the track to the next station on the live agent page. */
+.track-run {
+  animation: track-run 1.1s steps(12) infinite;
+}
+@keyframes track-run {
+  from {
+    left: 0;
+  }
+  to {
+    left: 100%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .track-run {
+    animation: none;
+  }
+}
+
+/* Search box mode chip */
+.chip-pop {
+  animation: chip-pop 0.22s cubic-bezier(0.3, 1.6, 0.5, 1);
+}
+@keyframes chip-pop {
+  from {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chip-pop {
+    animation: none;
+  }
 }
